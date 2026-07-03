@@ -1,0 +1,270 @@
+/** @import must precede all other statements */
+/* @import './fonts.css';  
+@import './tailwind.css';
+@import './theme.css';   */
+
+@import url("https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Inter:wght@400;600;700;800&family=Barlow+Condensed:wght@700;800&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+   */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 215.4 16.3% 20.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215.4 16.3% 20.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215.4 16.3% 20.9%;
+
+    --primary: 217.8 34.4% 19.7%; 
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215.3 18.5% 32.3%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 212.7 26.8% 93.9%;
+    --muted-foreground: 212.7 15.9% 47.3%;
+
+    --accent: 185.5 100% 26.1%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 212.7 26.8% 93.9%;
+    --input: 212.7 26.8% 93.9%;
+    --ring: 185.5 100% 26.1%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 217.8 34.4% 19.7%;
+    --sidebar-primary: 217.8 34.4% 19.7%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 185.5 100% 26.1%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 212.7 26.8% 93.9%;
+    --sidebar-ring: 185.5 100% 26.1%;
+  }
+
+  .dark {
+    --background: 217.8 34.4% 7%;
+    --foreground: 212.7 26.8% 93.9%;
+
+    --card: 217.8 34.4% 7%;
+    --card-foreground: 212.7 26.8% 93.9%;
+
+    --popover: 217.8 34.4% 7%;
+    --popover-foreground: 212.7 26.8% 93.9%;
+
+    --primary: 212.7 26.8% 93.9%;
+    --primary-foreground: 217.8 34.4% 19.7%;
+
+    --secondary: 212.7 26.8% 85%;
+    --secondary-foreground: 217.8 34.4% 19.7%;
+
+    --muted: 217.8 34.4% 15%;
+    --muted-foreground: 212.7 15.9% 60%;
+
+    --accent: 185.5 100% 45%;
+    --accent-foreground: 217.8 34.4% 19.7%;
+
+    --destructive: 0 84.2% 50.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.8 34.4% 15%;
+    --input: 217.8 34.4% 15%;
+    --ring: 185.5 100% 45%;
+    --sidebar-background: 217.8 34.4% 7%;
+    --sidebar-foreground: 212.7 26.8% 93.9%;
+    --sidebar-primary: 185.5 100% 45%;
+    --sidebar-primary-foreground: 217.8 34.4% 19.7%;
+    --sidebar-accent: 217.8 34.4% 20%;
+    --sidebar-accent-foreground: 212.7 26.8% 93.9%;
+    --sidebar-border: 217.8 34.4% 15%;
+    --sidebar-ring: 185.5 100% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  /* Better text wrapping: only break when necessary, not in the middle of words */
+  :where(p, span, li, h1, h2, h3, h4, h5, h6, a, button, label, td, th) {
+    overflow-wrap: anywhere;
+  }
+
+  pre,
+  code {
+    overflow-x: auto;
+    white-space: pre;
+  }
+}
+
+/* ───── Desktop System‑Interface Overrides ───── */
+@media (min-width: 1024px) {
+  .desktop-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  .desktop-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .desktop-horizontal-timeline {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .desktop-horizontal-timeline > div {
+    flex: 1;
+    min-width: 100px;
+    text-align: center;
+  }
+  .desktop-wide-container {
+    max-width: 1200px !important;
+  }
+  .desktop-large-padding {
+    padding: 40px 32px !important;
+  }
+  .desktop-bottom-nav-hidden {
+    display: none;
+  }
+  .desktop-stat-number {
+    font-size: 1.8rem !important;
+  }
+}
+
+/* Dashboard / data pages — professional slate background */
+.izi-dashboard-page {
+  background: #f8fafc;
+  overflow: auto;
+  min-height: 100vh;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.izi-skeleton {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 16px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   BUYER DASHBOARD — heading size neutralisation
+   
+   Root cause: Tailwind's @layer base resets h1–h6 to browser UA sizes
+   (h1 = 2em, h2 = 1.5em, etc.) which stack on top of the inline font-size
+   values set in BuyerDashboard.tsx, making them appear much larger than
+   intended on desktop.
+
+   This block lives OUTSIDE @layer so it has higher specificity and wins.
+   It resets all heading elements inside .buyer-root to 1rem (inheriting
+   the body font size), then the component's own inline styles take over
+   cleanly with their exact pixel values.
+───────────────────────────────────────────────────────────────────────────── */
+.buyer-root h1,
+.buyer-root h2,
+.buyer-root h3,
+.buyer-root h4,
+.buyer-root h5,
+.buyer-root h6 {
+  font-size: 1rem;
+  font-weight: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
+/* Also kill any Tailwind prose or typography plugin overrides inside the dashboard */
+.buyer-root * {
+  /* Prevent Tailwind base from re-applying em-based heading sizes */
+  font-size: revert-layer;
+}
+
+/* Restore body copy explicitly so the revert-layer above doesn't affect it */
+.buyer-root {
+  font-size: 16px;
+}
+
+/* ── Hero name ── */
+/* h1.hero-name: should be 34px on desktop, 26px on mobile */
+.buyer-root .hero-name {
+  font-size: 34px !important;
+  font-weight: 800 !important;
+  line-height: 1.05 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+
+@media (max-width: 640px) {
+  .buyer-root .hero-name {
+    font-size: 26px !important;
+  }
+}
+
+/* ── Page-level headings (Browse Listings, My Orders, etc.) ── */
+.buyer-root .page-heading {
+  font-size: 26px !important;
+  font-weight: 800 !important;
+  line-height: 1.05 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+
+@media (max-width: 640px) {
+  .buyer-root .page-heading {
+    font-size: 22px !important;
+  }
+}
+
+/* ── Section titles (How It Works, Identity Verification card headings) ── */
+.buyer-root .section-title {
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+
+/* ── Stat card values ── */
+.buyer-root .stat-value {
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+
+/* ── Profile name h1 inside profile card ── */
+.buyer-root .profile-layout h1 {
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+
+/* ── Right panel card headings (Refer a Buyer, Escrow, etc.) ── */
+.buyer-root .right-panel-card h3,
+.buyer-root .market-sidebar h3 {
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  font-family: 'Syne', sans-serif !important;
+}
+

@@ -1,0 +1,442 @@
+/* buyer-dashboard.css
+   Import this file at the top of BuyerDashboard.tsx:
+   import './buyer-dashboard.css'
+   (adjust the path to match where you place this file)
+
+   Because Vite bundles imported CSS after Tailwind's base/components/utilities,
+   these rules naturally win the cascade — no !important needed for layout.
+   We only use !important on font-size to beat any remaining browser UA or
+   Tailwind base heading resets.
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+/* ─── Keyframes ─────────────────────────────────────────────────────────────── */
+@keyframes bd-fadeUp    { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes bd-fadeIn    { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bd-scaleIn   { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes bd-slideUp   { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+@keyframes bd-spin      { to { transform: rotate(360deg); } }
+@keyframes bd-shimmer   { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes bd-pulse     { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* ─── Animation utility classes ─────────────────────────────────────────────── */
+.buyer-root .fu   { animation: bd-fadeUp  .5s cubic-bezier(.16,1,.3,1) both; }
+.buyer-root .fi   { animation: bd-fadeIn  .35s ease both; }
+.buyer-root .si   { animation: bd-scaleIn .3s cubic-bezier(.16,1,.3,1) both; }
+.buyer-root .slu  { animation: bd-slideUp .4s cubic-bezier(.16,1,.3,1) both; }
+.buyer-root .spin { animation: bd-spin .9s linear infinite; }
+
+/* ─── Root shell ─────────────────────────────────────────────────────────────── */
+.buyer-root {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background: #F4F2EE;
+  min-height: 100vh;
+  width: 100%;
+  font-size: 16px;
+}
+
+/* Kill Tailwind/UA heading size resets inside the dashboard completely */
+.buyer-root h1,
+.buyer-root h2,
+.buyer-root h3,
+.buyer-root h4,
+.buyer-root h5,
+.buyer-root h6 {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
+/* ─── HEADER ─────────────────────────────────────────────────────────────────── */
+.buyer-root .buyer-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #002E1A;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: env(safe-area-inset-top, 0px) 0 0;
+}
+.buyer-root .buyer-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  height: 64px;
+}
+.buyer-root .header-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.buyer-root .header-logo img {
+  height: 32px;
+  width: auto;
+  border-radius: 8px;
+}
+.buyer-root .header-nav-pills {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 4px;
+}
+.buyer-root .nav-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition: all 0.18s;
+  white-space: nowrap;
+}
+.buyer-root .nav-pill:hover { color: white; background: rgba(255,255,255,0.08); }
+.buyer-root .nav-pill.active { background: #006B3F; color: white; font-weight: 600; }
+.buyer-root .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* ─── PAGE WRAPPER ───────────────────────────────────────────────────────────── */
+.buyer-root .buyer-page {
+  width: 100%;
+  min-height: calc(100vh - 64px);
+  padding: 32px;
+  padding-bottom: 48px;
+}
+
+/* ─── HOME LAYOUT ────────────────────────────────────────────────────────────── */
+.buyer-root .home-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 24px;
+  align-items: start;
+}
+.buyer-root .home-left  { display: flex; flex-direction: column; gap: 20px; }
+.buyer-root .home-right { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 96px; }
+
+/* ─── HERO BANNER ────────────────────────────────────────────────────────────── */
+.buyer-root .hero-banner {
+  border-radius: 20px;
+  background: linear-gradient(135deg, #002E1A 0%, #004D2E 60%, #006B3F 100%);
+  padding: 36px 44px;
+  position: relative;
+  overflow: hidden;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.buyer-root .hero-banner::before {
+  content: '';
+  position: absolute;
+  top: -60px; right: -60px;
+  width: 280px; height: 280px;
+  border-radius: 50%;
+  background: rgba(200,153,26,0.12);
+}
+.buyer-root .hero-banner::after {
+  content: '';
+  position: absolute;
+  bottom: -40px; left: 40%;
+  width: 180px; height: 180px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+}
+.buyer-root .hero-greeting {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px !important;
+  font-weight: 400;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── THE CRITICAL ONE — hero name locked to 34px no matter what ── */
+.buyer-root .hero-name {
+  font-family: 'Syne', sans-serif !important;
+  font-size: 32px !important;
+  font-weight: 800 !important;
+  color: white !important;
+  line-height: 1.05 !important;
+  position: relative;
+  z-index: 1;
+  margin-bottom: 16px;
+}
+
+.buyer-root .hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 50px;
+  font-size: 11px !important;
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── STAT CARDS ─────────────────────────────────────────────────────────────── */
+.buyer-root .stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.buyer-root .stat-card {
+  background: white;
+  border-radius: 16px;
+  padding: 18px 16px;
+  border: 1px solid #E8E5DF;
+  position: relative;
+  overflow: hidden;
+}
+.buyer-root .stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.buyer-root .stat-label {
+  font-size: 12px !important;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9CA3AF;
+  margin-bottom: 8px;
+  font-family: 'DM Sans', sans-serif;
+}
+.buyer-root .stat-value {
+  font-family: 'Syne', sans-serif !important;
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  color: #111827 !important;
+  line-height: 1;
+}
+
+/* ─── SECTION LABELS ─────────────────────────────────────────────────────────── */
+.buyer-root .section-label {
+  font-size: 10px !important;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #C8991A;
+  margin-bottom: 4px;
+  font-family: 'DM Sans', sans-serif;
+}
+.buyer-root .section-title {
+  font-family: 'Syne', sans-serif !important;
+  font-weight: 800 !important;
+  color: #111827;
+  font-size: 20px !important;
+  line-height: 1.1;
+  margin-bottom: 16px;
+}
+
+/* ── Page-level headings (Browse Listings / My Orders) ── */
+.buyer-root .page-heading {
+  font-family: 'Syne', sans-serif !important;
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  color: #111827 !important;
+  line-height: 1.05 !important;
+}
+
+/* ─── CARDS ──────────────────────────────────────────────────────────────────── */
+.buyer-root .card-white {
+  background: white;
+  border-radius: 20px;
+  border: 1px solid #E8E5DF;
+  overflow: hidden;
+}
+.buyer-root .card-hover { transition: transform .2s, box-shadow .2s; cursor: pointer; }
+.buyer-root .card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.09); }
+
+/* ─── QUICK ACTIONS ──────────────────────────────────────────────────────────── */
+.buyer-root .actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.buyer-root .action-tile {
+  background: white;
+  border-radius: 16px;
+  padding: 20px 18px;
+  border: 1px solid #E8E5DF;
+  cursor: pointer;
+  transition: all .2s;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.buyer-root .action-tile:hover { border-color: rgba(0,107,63,0.3); box-shadow: 0 4px 20px rgba(0,107,63,0.08); transform: translateY(-1px); }
+.buyer-root .action-tile.locked { opacity: 0.5; cursor: not-allowed; }
+.buyer-root .action-tile.locked:hover { transform: none; box-shadow: none; border-color: #E8E5DF; }
+.buyer-root .action-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+
+/* ─── RIGHT PANEL ────────────────────────────────────────────────────────────── */
+.buyer-root .right-panel-card {
+  background: #002E1A;
+  border-radius: 20px;
+  padding: 26px 22px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.buyer-root .right-panel-card::before {
+  content: '';
+  position: absolute;
+  bottom: -40px; right: -40px;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: rgba(200,153,26,0.1);
+}
+
+/* ─── HOW IT WORKS ───────────────────────────────────────────────────────────── */
+.buyer-root .hiw-step { display: flex; align-items: flex-start; gap: 16px; padding: 16px 22px; border-bottom: 1px solid #F3F4F6; }
+.buyer-root .hiw-step:last-child { border-bottom: none; }
+.buyer-root .hiw-num {
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: rgba(0,107,63,0.08);
+  border: 1px solid rgba(0,107,63,0.12);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 12px !important;
+  color: #006B3F;
+  flex-shrink: 0;
+}
+
+/* ─── VERIFICATION TRACK ─────────────────────────────────────────────────────── */
+.buyer-root .ver-track { display: flex; align-items: center; justify-content: space-between; position: relative; padding: 0 8px; margin: 20px 0; }
+.buyer-root .ver-track::before { content: ''; position: absolute; top: 15px; left: 24px; right: 24px; height: 2px; background: #E5E7EB; z-index: 0; }
+.buyer-root .ver-track-fill { position: absolute; top: 15px; left: 24px; height: 2px; width: 33%; background: #C8991A; z-index: 1; }
+.buyer-root .ver-step { display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; z-index: 2; }
+.buyer-root .ver-dot { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px !important; font-weight: 700; }
+
+/* ─── MARKET TAB ─────────────────────────────────────────────────────────────── */
+.buyer-root .market-layout { display: grid; grid-template-columns: 300px 1fr; gap: 24px; align-items: start; }
+.buyer-root .market-sidebar { background: #002E1A; border-radius: 20px; padding: 26px 22px; color: white; position: sticky; top: 96px; }
+.buyer-root .market-listings-area { display: flex; flex-direction: column; gap: 16px; }
+.buyer-root .market-listings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.buyer-root .listing-card { background: white; border-radius: 16px; border: 1px solid #E8E5DF; overflow: hidden; transition: all .2s; }
+.buyer-root .listing-card:hover { border-color: rgba(0,107,63,0.25); box-shadow: 0 6px 20px rgba(0,0,0,0.08); transform: translateY(-2px); }
+.buyer-root .listing-card-top { height: 4px; }
+.buyer-root .listing-card-body { padding: 16px; }
+.buyer-root .listing-price { font-family: 'Syne', sans-serif !important; font-weight: 800 !important; font-size: 20px !important; line-height: 1; }
+
+/* ─── ORDERS TAB ─────────────────────────────────────────────────────────────── */
+.buyer-root .orders-layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start; }
+.buyer-root .order-card { background: white; border-radius: 16px; border: 1px solid #E8E5DF; overflow: hidden; margin-bottom: 14px; }
+.buyer-root .order-card-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: #F9FAFB; border-bottom: 1px solid #F3F4F6; }
+.buyer-root .status-pill { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 50px; font-size: 10px !important; font-weight: 700; }
+
+/* ─── PROFILE TAB ────────────────────────────────────────────────────────────── */
+.buyer-root .profile-layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; align-items: start; }
+.buyer-root .profile-cover { height: 110px; background: linear-gradient(135deg, #002E1A 0%, #006B3F 100%); border-radius: 20px 20px 0 0; position: relative; }
+.buyer-root .profile-avatar {
+  position: absolute;
+  bottom: -40px; left: 26px;
+  width: 80px; height: 80px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #C8991A, #A0760E);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-size: 26px !important;
+  font-weight: 800;
+  color: white;
+  border: 4px solid white;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.buyer-root .profile-stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #E8E5DF; }
+.buyer-root .profile-stat { background: white; padding: 16px; text-align: center; }
+
+/* ─── BUTTONS ────────────────────────────────────────────────────────────────── */
+.buyer-root .btn-green {
+  background: #006B3F;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 13px !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background .15s, transform .1s;
+  white-space: nowrap;
+}
+.buyer-root .btn-green:hover { background: #004D2E; }
+.buyer-root .btn-green:active { transform: scale(.98); }
+.buyer-root .btn-green:disabled { opacity: .6; cursor: not-allowed; }
+.buyer-root .btn-outline-sm {
+  background: white;
+  color: #374151;
+  border: 1px solid #D1D5DB;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 13px !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all .15s;
+}
+.buyer-root .btn-outline-sm:hover { border-color: #006B3F; color: #006B3F; background: #F0FBF6; }
+
+/* ─── SEARCH BAR ─────────────────────────────────────────────────────────────── */
+.buyer-root .search-bar { display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: white; border: 1.5px solid #E8E5DF; border-radius: 12px; transition: border-color .15s; }
+.buyer-root .search-bar:focus-within { border-color: #006B3F; }
+.buyer-root .search-bar input { flex: 1; background: none; border: none; outline: none; font-size: 14px !important; color: #111827; font-family: 'DM Sans', sans-serif; }
+
+/* ─── CHIPS ──────────────────────────────────────────────────────────────────── */
+.buyer-root .chip { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 50px; font-size: 12px !important; font-weight: 500; cursor: pointer; border: 1px solid #E8E5DF; background: white; color: #4B5563; transition: all .15s; white-space: nowrap; }
+.buyer-root .chip:hover { border-color: #006B3F; color: #006B3F; }
+.buyer-root .chip.active { background: #006B3F; color: white; border-color: #006B3F; }
+
+/* ─── SKELETON ───────────────────────────────────────────────────────────────── */
+.buyer-root .skel { background: linear-gradient(90deg,#f3f4f6 25%,#e5e7eb 50%,#f3f4f6 75%); background-size: 200% 100%; animation: bd-shimmer 1.5s infinite; border-radius: 6px; }
+
+/* ─── EMPTY STATE ────────────────────────────────────────────────────────────── */
+.buyer-root .empty-state { text-align: center; padding: 64px 24px; background: white; border-radius: 20px; border: 1.5px dashed #D1D5DB; }
+
+/* ─── SCROLLBAR ──────────────────────────────────────────────────────────────── */
+.buyer-root ::-webkit-scrollbar { width: 3px; height: 3px; }
+.buyer-root ::-webkit-scrollbar-track { background: transparent; }
+.buyer-root ::-webkit-scrollbar-thumb { background: rgba(0,107,63,.25); border-radius: 3px; }
+
+/* ─── MODAL (fixed overlay — scoping to buyer-root won't work for fixed, so global) ── */
+.modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.5); backdrop-filter: blur(6px); display: flex; align-items: flex-end; justify-content: center; }
+.modal-sheet { width: 100%; max-width: 520px; background: white; border-radius: 28px 28px 0 0; overflow: hidden; box-shadow: 0 -8px 48px rgba(0,0,0,0.15); animation: bd-slideUp .35s cubic-bezier(.16,1,.3,1) both; }
+
+/* ─── RESPONSIVE ─────────────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .buyer-root .home-layout { grid-template-columns: 1fr; }
+  .buyer-root .home-right { position: static; }
+  .buyer-root .market-layout { grid-template-columns: 1fr; }
+  .buyer-root .market-sidebar { position: static; display: none; }
+  .buyer-root .orders-layout { grid-template-columns: 1fr; }
+  .buyer-root .profile-layout { grid-template-columns: 1fr; }
+  .buyer-root .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .buyer-root .market-listings-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .buyer-root .buyer-page { padding: 16px; }
+  .buyer-root .buyer-header-inner { padding: 0 16px; }
+  .buyer-root .hero-banner { padding: 24px 22px; }
+  .buyer-root .hero-name { font-size: 26px !important; }
+  .buyer-root .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .buyer-root .actions-grid { grid-template-columns: 1fr 1fr; }
+  .buyer-root .nav-pill .nav-label { display: none; }
+  .buyer-root .page-heading { font-size: 22px !important; }
+}
