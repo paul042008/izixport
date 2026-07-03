@@ -102,11 +102,13 @@ export default function Signup() {
 
       if (signUpError) {
         toast.error(signUpError.message || 'Signup failed', { duration: 5000 })
+        setLoading(false)
         return
       }
 
       if (!authData.user) {
         toast.error('Something went wrong. Please try again.', { duration: 5000 })
+        setLoading(false)
         return
       }
 
@@ -132,15 +134,20 @@ export default function Signup() {
       toast.success('Account created! Check your email to verify.', { duration: 4000 })
 
       // 3. Redirect to Verify Email page
-      navigate('/verify-email', { 
-        state: { email: data.email },
-        replace: true 
-      })
+      // FIX: Clear loading BEFORE navigating so React doesn't re-render and block the transition
+      setLoading(false)
+
+      // Small delay lets the toast render and any auth state settle before routing
+      setTimeout(() => {
+        navigate('/verify-email', { 
+          state: { email: data.email }
+          // FIX: Removed replace:true — it was replacing the history entry and causing the page to stick
+        })
+      }, 100)
 
     } catch (err: any) {
       console.error('Signup error:', err)
       toast.error('Network error. Please check your connection and try again.', { duration: 5000 })
-    } finally {
       setLoading(false)
     }
   }
