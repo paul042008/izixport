@@ -17,6 +17,12 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: "dist/spa",
     sourcemap: mode === "development",
+    // Add this for SPA routing support in production builds
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
   },
 
   plugins: [react(), expressPlugin()],
@@ -28,22 +34,18 @@ export default defineConfig(({ mode }) => ({
     },
   },
 
-  // Better handling for third-party packages with old TypeScript configs
   optimizeDeps: {
-    exclude: ["flutterwave-react-v3"], // Prevent issues with old package
+    exclude: ["flutterwave-react-v3"],
   },
 }));
 
 function expressPlugin(): Plugin {
   return {
     name: "express-plugin",
-    apply: "serve",
+    apply: "serve", // Only runs in dev — safe for Vercel build
     configureServer(viteServer) {
       const expressApp = createServer();
-
-      // Mount Express app as middleware
       viteServer.middlewares.use(expressApp);
-
       console.log("✅ Express server middleware mounted on Vite dev server");
     },
   };
