@@ -1,5 +1,6 @@
 // src/pages/onboarding/ExporterStep2.tsx
 // FIXED - Redirect works properly, added bank_name field
+// UPDATED - Desktop split-screen layout with left info panel
 
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +21,10 @@ import {
   Banknote,
   Loader2,
   ChevronDown,
+  Check,
+  Lock,
+  ShieldCheck,
+  Globe,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -361,301 +366,511 @@ export default function ExporterStep2() {
   const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 flex items-center justify-center">
-      <div
-        className="w-full max-w-lg bg-white rounded-3xl shadow-lg p-8"
-        style={{ border: `1px solid ${COLORS.gray200}` }}
-      >
-        {/* Progress bar */}
-        <div className="flex mb-8">
-          <div className="flex-1">
-            <div
-              className="h-2 rounded-full"
-              style={{ background: COLORS.accent }}
-            />
-            <p
-              className="text-xs mt-2 font-medium"
-              style={{ color: COLORS.accent }}
-            >
-              Step 2 of 2
-            </p>
-          </div>
-        </div>
-
-        <h2
-          className="text-3xl font-black mb-6"
+    <div className="min-h-screen bg-[#F2EFE9] py-8 px-4 flex items-center justify-center">
+      <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-6 items-stretch">
+        {/* ─────────────────────────────────────────────
+            LEFT PANEL — Desktop Only
+            ───────────────────────────────────────────── */}
+        <div
+          className="hidden lg:flex lg:w-[44%] flex-col justify-between rounded-3xl p-10 text-white relative overflow-hidden"
           style={{
-            fontFamily: 'Barlow Condensed, sans-serif',
-            color: COLORS.gray900,
+            background: 'linear-gradient(160deg, #002E1A 0%, #004D2E 100%)',
+            fontFamily: 'Barlow, sans-serif',
           }}
         >
-          Verify Your Business
-        </h2>
+          {/* Subtle dot pattern */}
+          <div
+            className="absolute inset-0 opacity-10 pointer-events-none"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.15) 1px, transparent 0)',
+              backgroundSize: '24px 24px',
+            }}
+          />
 
-        {/* ── CAC ── */}
-        <div className="mb-8">
-          <label
-            className="text-xs font-bold uppercase tracking-wider mb-2 block"
-            style={{ color: COLORS.accent }}
-          >
-            CAC Number
-          </label>
-          <div className="flex gap-2 mb-2">
-            <div className="relative flex-1">
-              <Building2
-                className="absolute left-3 top-1/2 -translate-y-1/2"
-                style={{ color: COLORS.gray400 }}
-                size={16}
-              />
-              <input
-                type="text"
-                placeholder="RC123456 or 123456"
-                value={cacInput}
-                onChange={(e) => setCacInput(e.target.value)}
-                className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
-                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                disabled={cacLoading}
-              />
+          <div className="relative z-10">
+            {/* Brand */}
+            <div className="flex items-center gap-2 mb-8">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: '#C8991A' }}
+              >
+                <span className="text-white font-black text-sm">I</span>
+              </div>
+              <span className="font-bold text-lg tracking-tight">IziXport</span>
             </div>
-            <button
-              onClick={handleCACVerify}
-              disabled={cacLoading || !cacInput.trim()}
-              className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
+
+            {/* Badge */}
+            <div
+              className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6 border"
               style={{
-                border: `1px solid ${COLORS.accent}`,
-                color: COLORS.accent,
-                background: 'transparent',
+                borderColor: 'rgba(200,153,26,0.4)',
+                background: 'rgba(200,153,26,0.1)',
               }}
             >
-              {cacLoading ? 'Verifying…' : 'Verify CAC →'}
-            </button>
-          </div>
-          {import.meta.env.DEV && (
-            <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
-              🧪 Sandbox test: RC1234567
-            </p>
-          )}
-          <p className="text-xs" style={{ color: COLORS.gray400 }}>
-            Your Corporate Affairs Commission registration number
-          </p>
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span
+                className="text-xs font-semibold uppercase tracking-widest"
+                style={{ color: '#C8991A' }}
+              >
+                Verified Exporter Onboarding
+              </span>
+            </div>
 
-          {cacResult?.verified && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
-              <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-              <p className="font-bold" style={{ color: COLORS.gray800 }}>
-                {cacResult.company_name}
-              </p>
-              <p className="text-sm" style={{ color: '#059669' }}>
-                {cacResult.company_type} · Registered {cacResult.registration_date}
+            {/* Headline */}
+            <h2
+              className="text-4xl font-black leading-tight mb-4"
+              style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
+            >
+              Trade With <span style={{ color: '#C8991A' }}>Confidence.</span>
+            </h2>
+            <p
+              className="text-sm leading-relaxed mb-8"
+              style={{ color: 'rgba(255,255,255,0.7)' }}
+            >
+              Join verified Nigerian exporters selling globally through full
+              escrow protection.
+            </p>
+
+            {/* Why Choose */}
+            <div className="mb-6">
+              <h3
+                className="text-xs font-bold uppercase tracking-widest mb-3"
+                style={{ color: '#C8991A' }}
+              >
+                Why Choose IziXport
+              </h3>
+              <ul className="space-y-2.5">
+                {[
+                  'Direct access to international buyers from 38+ countries',
+                  'Full escrow protection on every deal — you ship, you get paid',
+                  'Zero upfront listing fees or hidden charges',
+                  'Every buyer is admin-verified before they can place orders',
+                ].map((item, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-sm"
+                    style={{ color: 'rgba(255,255,255,0.8)' }}
+                  >
+                    <Check
+                      size={14}
+                      className="mt-0.5 shrink-0"
+                      style={{ color: '#C8991A' }}
+                    />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* What You're Missing */}
+            <div
+              className="p-4 rounded-xl mb-6"
+              style={{
+                background: 'rgba(200,153,26,0.08)',
+                border: '1px solid rgba(200,153,26,0.2)',
+              }}
+            >
+              <h3
+                className="text-xs font-bold uppercase tracking-widest mb-2"
+                style={{ color: '#C8991A' }}
+              >
+                What You're Missing
+              </h3>
+              <p
+                className="text-xs leading-relaxed"
+                style={{ color: 'rgba(255,255,255,0.65)' }}
+              >
+                Without completing verification, your profile remains invisible
+                to buyers, you cannot access escrow-protected deals, and you miss
+                out on premium international leads reviewed by our admin team.
               </p>
             </div>
-          )}
-          {cacResult && !cacResult.verified && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
-              <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-              <p className="text-sm text-red-700">
-                {cacResult.error || 'CAC not found'}
+
+            {/* Admin Review */}
+            <div
+              className="p-4 rounded-xl"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <h3
+                className="text-xs font-bold uppercase tracking-widest mb-2"
+                style={{ color: '#C8991A' }}
+              >
+                Admin Review
+              </h3>
+              <p
+                className="text-xs leading-relaxed"
+                style={{ color: 'rgba(255,255,255,0.65)' }}
+              >
+                Our admin team will review and verify your account within 24 hours
+                of submission. You'll receive an email notification once approved,
+                and your exporter dashboard will be activated immediately.
               </p>
             </div>
-          )}
+          </div>
+
+          {/* Bottom trust badges */}
+          <div
+            className="relative z-10 mt-8 pt-6"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="grid grid-cols-1 gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                >
+                  <Lock size={14} style={{ color: '#C8991A' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold">Escrow-Protected Payments</p>
+                  <p
+                    className="text-[10px]"
+                    style={{ color: 'rgba(255,255,255,0.5)' }}
+                  >
+                    Your funds are secure until delivery
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                >
+                  <ShieldCheck size={14} style={{ color: '#C8991A' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold">100% Verified Traders</p>
+                  <p
+                    className="text-[10px]"
+                    style={{ color: 'rgba(255,255,255,0.5)' }}
+                  >
+                    Every account manually reviewed
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                >
+                  <Globe size={14} style={{ color: '#C8991A' }} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold">38 Countries Served</p>
+                  <p
+                    className="text-[10px]"
+                    style={{ color: 'rgba(255,255,255,0.5)' }}
+                  >
+                    Global buyer network
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* ── NIN ── */}
-        <div className="mb-8">
-          <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-            NIN Number
-          </label>
-          <div className="flex gap-2 mb-2">
-            <div className="relative flex-1">
-              <input
-                type={showNIN ? 'text' : 'password'}
-                placeholder="11-digit NIN number"
-                value={ninInput}
-                onChange={(e) => setNinInput(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
-                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                disabled={ninLoading}
+        {/* ─────────────────────────────────────────────
+            RIGHT PANEL — Onboarding Form
+            ───────────────────────────────────────────── */}
+        <div
+          className="w-full max-w-lg lg:max-w-none lg:w-[56%] mx-auto lg:mx-0 bg-white rounded-3xl shadow-lg p-8"
+          style={{ border: `1px solid ${COLORS.gray200}` }}
+        >
+          {/* Progress bar */}
+          <div className="flex mb-8">
+            <div className="flex-1">
+              <div
+                className="h-2 rounded-full"
+                style={{ background: COLORS.accent }}
               />
-              <button
-                type="button"
-                onClick={() => setShowNIN(!showNIN)}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-                style={{ color: COLORS.gray400 }}
+              <p
+                className="text-xs mt-2 font-medium"
+                style={{ color: COLORS.accent }}
               >
-                {showNIN ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                Step 2 of 2
+              </p>
+            </div>
+          </div>
+
+          <h2
+            className="text-3xl font-black mb-6"
+            style={{
+              fontFamily: 'Barlow Condensed, sans-serif',
+              color: COLORS.gray900,
+            }}
+          >
+            Verify Your Business
+          </h2>
+
+          {/* ── CAC ── */}
+          <div className="mb-8">
+            <label
+              className="text-xs font-bold uppercase tracking-wider mb-2 block"
+              style={{ color: COLORS.accent }}
+            >
+              CAC Number
+            </label>
+            <div className="flex gap-2 mb-2">
+              <div className="relative flex-1">
+                <Building2
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: COLORS.gray400 }}
+                  size={16}
+                />
+                <input
+                  type="text"
+                  placeholder="RC123456 or 123456"
+                  value={cacInput}
+                  onChange={(e) => setCacInput(e.target.value)}
+                  className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
+                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                  disabled={cacLoading}
+                />
+              </div>
+              <button
+                onClick={handleCACVerify}
+                disabled={cacLoading || !cacInput.trim()}
+                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
+                style={{
+                  border: `1px solid ${COLORS.accent}`,
+                  color: COLORS.accent,
+                  background: 'transparent',
+                }}
+              >
+                {cacLoading ? 'Verifying…' : 'Verify CAC →'}
               </button>
             </div>
-            <button
-              onClick={handleNINVerify}
-              disabled={ninLoading || !ninInput.trim()}
-              className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
-              style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
-            >
-              {ninLoading ? 'Verifying…' : 'Verify NIN →'}
-            </button>
-          </div>
-          {import.meta.env.DEV && (
-            <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
-              🧪 Sandbox test: 12345678901
+            {import.meta.env.DEV && (
+              <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
+                🧪 Sandbox test: RC1234567
+              </p>
+            )}
+            <p className="text-xs" style={{ color: COLORS.gray400 }}>
+              Your Corporate Affairs Commission registration number
             </p>
-          )}
-          <p className="text-xs flex items-center gap-1" style={{ color: COLORS.gray400 }}>
-            <AlertTriangle className="w-3 h-3" /> Your NIN is verified and immediately discarded. Never stored.
-          </p>
 
-          {ninResult?.verified && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
-              <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-              <p className="font-bold" style={{ color: COLORS.gray800 }}>Identity Verified</p>
-              <p className="text-sm" style={{ color: '#059669' }}>Your NIN has been verified and discarded.</p>
-            </div>
-          )}
-          {ninResult && !ninResult.verified && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
-              <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-              <p className="text-sm text-red-700">{ninResult.error || 'NIN verification failed'}</p>
-            </div>
-          )}
-        </div>
-
-        {/* ── Bank Account Details ── */}
-        <div className="mb-8">
-          <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-            Bank Account for Escrow Payouts
-          </label>
-          <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>
-            We’ll send your earnings here after delivery is confirmed.
-          </p>
-
-          <div className="mb-3 relative" ref={dropdownRef}>
-            <button
-              type="button"
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
-              style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-            >
-              <span className={selectedBankName ? '' : 'text-gray-400'}>
-                {selectedBankName || 'Select your bank'}
-              </span>
-              <ChevronDown size={16} className="text-gray-400" />
-            </button>
-
-            {dropdownOpen && (
-              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto" style={{ borderRadius: 12 }}>
-                {banks.map((bank) => (
-                  <div
-                    key={bank.code}
-                    onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }}
-                    className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`}
-                    style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                  >
-                    {bank.name}
-                  </div>
-                ))}
+            {cacResult?.verified && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+                <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
+                <p className="font-bold" style={{ color: COLORS.gray800 }}>
+                  {cacResult.company_name}
+                </p>
+                <p className="text-sm" style={{ color: '#059669' }}>
+                  {cacResult.company_type} · Registered {cacResult.registration_date}
+                </p>
+              </div>
+            )}
+            {cacResult && !cacResult.verified && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+                <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
+                <p className="text-sm text-red-700">
+                  {cacResult.error || 'CAC not found'}
+                </p>
               </div>
             )}
           </div>
 
-          <div className="flex gap-2 mb-2">
-            <div className="relative flex-1">
-              <Banknote className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={10}
-                placeholder="Account number (10 digits)"
-                value={accountNumber}
-                onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
+          {/* ── NIN ── */}
+          <div className="mb-8">
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
+              NIN Number
+            </label>
+            <div className="flex gap-2 mb-2">
+              <div className="relative flex-1">
+                <input
+                  type={showNIN ? 'text' : 'password'}
+                  placeholder="11-digit NIN number"
+                  value={ninInput}
+                  onChange={(e) => setNinInput(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
+                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                  disabled={ninLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNIN(!showNIN)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  style={{ color: COLORS.gray400 }}
+                >
+                  {showNIN ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <button
+                onClick={handleNINVerify}
+                disabled={ninLoading || !ninInput.trim()}
+                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
+                style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
+              >
+                {ninLoading ? 'Verifying…' : 'Verify NIN →'}
+              </button>
+            </div>
+            {import.meta.env.DEV && (
+              <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
+                🧪 Sandbox test: 12345678901
+              </p>
+            )}
+            <p className="text-xs flex items-center gap-1" style={{ color: COLORS.gray400 }}>
+              <AlertTriangle className="w-3 h-3" /> Your NIN is verified and immediately discarded. Never stored.
+            </p>
+
+            {ninResult?.verified && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+                <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
+                <p className="font-bold" style={{ color: COLORS.gray800 }}>Identity Verified</p>
+                <p className="text-sm" style={{ color: '#059669' }}>Your NIN has been verified and discarded.</p>
+              </div>
+            )}
+            {ninResult && !ninResult.verified && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+                <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
+                <p className="text-sm text-red-700">{ninResult.error || 'NIN verification failed'}</p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Bank Account Details ── */}
+          <div className="mb-8">
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
+              Bank Account for Escrow Payouts
+            </label>
+            <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>
+              We’ll send your earnings here after delivery is confirmed.
+            </p>
+
+            <div className="mb-3 relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
                 style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                disabled={bankLoading}
-              />
+              >
+                <span className={selectedBankName ? '' : 'text-gray-400'}>
+                  {selectedBankName || 'Select your bank'}
+                </span>
+                <ChevronDown size={16} className="text-gray-400" />
+              </button>
+
+              {dropdownOpen && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto" style={{ borderRadius: 12 }}>
+                  {banks.map((bank) => (
+                    <div
+                      key={bank.code}
+                      onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }}
+                      className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`}
+                      style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                    >
+                      {bank.name}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <button
-              onClick={handleBankVerify}
-              disabled={bankLoading || !bankCode || accountNumber.length !== 10}
-              className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
-              style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
-            >
-              {bankLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Verify Account →'}
-            </button>
-          </div>
 
-          {bankVerified && accountName && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
-              <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-              <p className="font-bold" style={{ color: COLORS.gray800 }}>{accountName}</p>
-              <p className="text-sm" style={{ color: '#059669' }}>Account verified successfully</p>
+            <div className="flex gap-2 mb-2">
+              <div className="relative flex-1">
+                <Banknote className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder="Account number (10 digits)"
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
+                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                  disabled={bankLoading}
+                />
+              </div>
+              <button
+                onClick={handleBankVerify}
+                disabled={bankLoading || !bankCode || accountNumber.length !== 10}
+                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
+                style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
+              >
+                {bankLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Verify Account →'}
+              </button>
             </div>
-          )}
-          {bankError && (
-            <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
-              <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-              <p className="text-sm text-red-700">{bankError}</p>
-            </div>
-          )}
-        </div>
 
-        {/* Dojah offline fallback */}
-        {dojahOffline && (
-          <div className="mb-8 p-4 rounded-xl" style={{ background: '#FEF3C7', border: `1px solid #FDE68A`, color: '#92400E' }}>
-            <AlertTriangle className="w-5 h-5 mb-2" />
-            <p className="font-semibold text-sm">Automated verification is temporarily unavailable.</p>
-            <p className="text-xs mt-1">Your documents will be reviewed manually by our team within 24 hours. You can still submit now.</p>
-          </div>
-        )}
-
-        {/* Documents */}
-        <div className="mb-8">
-          <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-            Supporting Documents
-          </label>
-          <div className="p-4 rounded-xl mb-4 text-xs" style={{ background: '#EFF6FF', border: `1px solid #BFDBFE`, color: '#1E40AF' }}>
-            Our team visually reviews your CAC certificate to confirm authenticity. Documents are permanently deleted within 24 hours of review.
-          </div>
-
-          <div className="border-2 border-dashed rounded-xl p-6 text-center mb-4 relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.accent }} onClick={() => fileInputRef.current?.click()}>
-            <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.accent }} />
-            <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>CAC Certificate (Required)</p>
-            <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
-            <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('cac', e)} />
-            {cacFile && (
-              <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
-                <CheckCircle2 className="w-3 h-3" /> {cacFile.name}
+            {bankVerified && accountName && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+                <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
+                <p className="font-bold" style={{ color: COLORS.gray800 }}>{accountName}</p>
+                <p className="text-sm" style={{ color: '#059669' }}>Account verified successfully</p>
+              </div>
+            )}
+            {bankError && (
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+                <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
+                <p className="text-sm text-red-700">{bankError}</p>
               </div>
             )}
           </div>
 
-          <div className="border-2 border-dashed rounded-xl p-6 text-center relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.gray200 }}>
-            <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.gray400 }} />
-            <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>NEPC Registration (Optional)</p>
-            <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
-            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('nepc', e)} />
-            {nepcFile && (
-              <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
-                <CheckCircle2 className="w-3 h-3" /> {nepcFile.name}
-              </div>
-            )}
+          {/* Dojah offline fallback */}
+          {dojahOffline && (
+            <div className="mb-8 p-4 rounded-xl" style={{ background: '#FEF3C7', border: `1px solid #FDE68A`, color: '#92400E' }}>
+              <AlertTriangle className="w-5 h-5 mb-2" />
+              <p className="font-semibold text-sm">Automated verification is temporarily unavailable.</p>
+              <p className="text-xs mt-1">Your documents will be reviewed manually by our team within 24 hours. You can still submit now.</p>
+            </div>
+          )}
+
+          {/* Documents */}
+          <div className="mb-8">
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
+              Supporting Documents
+            </label>
+            <div className="p-4 rounded-xl mb-4 text-xs" style={{ background: '#EFF6FF', border: `1px solid #BFDBFE`, color: '#1E40AF' }}>
+              Our team visually reviews your CAC certificate to confirm authenticity. Documents are permanently deleted within 24 hours of review.
+            </div>
+
+            <div className="border-2 border-dashed rounded-xl p-6 text-center mb-4 relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.accent }} onClick={() => fileInputRef.current?.click()}>
+              <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.accent }} />
+              <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>CAC Certificate (Required)</p>
+              <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('cac', e)} />
+              {cacFile && (
+                <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
+                  <CheckCircle2 className="w-3 h-3" /> {cacFile.name}
+                </div>
+              )}
+            </div>
+
+            <div className="border-2 border-dashed rounded-xl p-6 text-center relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.gray200 }}>
+              <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.gray400 }} />
+              <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>NEPC Registration (Optional)</p>
+              <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
+              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('nepc', e)} />
+              {nepcFile && (
+                <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
+                  <CheckCircle2 className="w-3 h-3" /> {nepcFile.name}
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Submit */}
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+            className="btn-primary w-full py-4 rounded-xl font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+          >
+            {submitting ? 'Submitting…' : 'Submit for Verification →'}
+          </button>
+
+          <p className="text-xs text-center mt-4" style={{ color: COLORS.gray400 }}>
+            IziXport is NDPC registered. Your data is protected under the Nigeria Data Protection Regulation.
+          </p>
         </div>
-
-        {/* Submit */}
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          className="btn-primary w-full py-4 rounded-xl font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-        >
-          {submitting ? 'Submitting…' : 'Submit for Verification →'}
-        </button>
-
-        <p className="text-xs text-center mt-4" style={{ color: COLORS.gray400 }}>
-          IziXport is NDPC registered. Your data is protected under the Nigeria Data Protection Regulation.
-        </p>
       </div>
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Barlow:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
         @keyframes btnShimmer {
           0% { background-position: -200% center; }
           100% { background-position: 200% center; }

@@ -14,6 +14,9 @@ import {
   Globe,
   FileText,
   ArrowLeft,
+  ShieldCheck,
+  BadgeCheck,
+  MapPinned,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -427,8 +430,125 @@ export default function BuyerOnboarding() {
 
   // ---------- Render UI ----------
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4" style={{ background: '#002E1A' }}>
-      <div className="w-full max-w-[480px] bg-white rounded-3xl shadow-2xl p-8" style={{ fontFamily: 'Barlow, sans-serif' }}>
+    <div className="min-h-screen flex items-stretch justify-center lg:py-10 px-0 lg:px-4" style={{ background: '#F2EFE9' }}>
+      <div className="w-full lg:max-w-[1100px] flex lg:rounded-3xl overflow-hidden lg:shadow-2xl">
+
+        {/* ══════════════════════════════════════
+            LEFT PANEL — DESKTOP ONLY
+        ══════════════════════════════════════ */}
+        <div
+          className="hidden lg:flex lg:w-[46%] flex-col justify-between p-10 relative"
+          style={{
+            background: 'linear-gradient(160deg, #002E1A 0%, #004D2E 100%)',
+            fontFamily: 'Barlow, sans-serif',
+          }}
+        >
+          <div>
+            {/* Logo */}
+            <div className="flex items-center gap-2 mb-10">
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center font-black text-sm"
+                style={{ background: '#C8991A', color: '#002E1A', fontFamily: 'Barlow Condensed, sans-serif' }}
+              >
+                IZ
+              </div>
+              <span className="text-white font-bold text-lg tracking-tight" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
+                IziXport
+              </span>
+            </div>
+
+            {/* Badge */}
+            <div
+              className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6"
+              style={{ background: 'rgba(200,153,26,0.15)', border: '1px solid rgba(200,153,26,0.4)' }}
+            >
+              <BadgeCheck size={14} style={{ color: '#C8991A' }} />
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#C8991A' }}>
+                Verified Buyer Onboarding
+              </span>
+            </div>
+
+            {/* Headline */}
+            <h1
+              className="text-[38px] leading-[1.05] font-black text-white mb-4"
+              style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
+            >
+              Trade With <span style={{ color: '#C8991A' }}>Confidence.</span>
+            </h1>
+            <p className="text-sm leading-relaxed mb-8" style={{ color: '#B9C9BF' }}>
+              We connect verified global buyers with admin-vetted Nigerian exporters —
+              every transaction backed by full escrow protection.
+            </p>
+
+            {/* Why Choose IziXport */}
+            <div className="mb-6">
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#C8991A' }}>
+                Why Choose IziXport
+              </p>
+              <ul className="space-y-2.5">
+                {[
+                  'Direct access to verified Nigerian exporters',
+                  'Full escrow protection on every deal',
+                  'Zero upfront fees or hidden charges',
+                  'Every exporter is admin-verified before they can accept orders',
+                ].map(item => (
+                  <li key={item} className="flex items-start gap-2.5 text-sm" style={{ color: '#E5ECE8' }}>
+                    <Check size={15} className="mt-0.5 flex-shrink-0" style={{ color: '#C8991A' }} />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* What You're Missing */}
+            <div
+              className="rounded-xl p-4 mb-6"
+              style={{ border: '1px solid rgba(200,153,26,0.5)', background: 'rgba(200,153,26,0.06)' }}
+            >
+              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#C8991A' }}>
+                What You're Missing
+              </p>
+              <p className="text-xs leading-relaxed" style={{ color: '#D9E3DC' }}>
+                Until verification is complete, you won't be able to see verified exporters,
+                access escrow-protected deals, or receive premium leads.
+              </p>
+            </div>
+
+            {/* Admin Review */}
+            <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.06)' }}>
+              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#B9C9BF' }}>
+                Admin Review
+              </p>
+              <p className="text-xs leading-relaxed" style={{ color: '#D9E3DC' }}>
+                Our admin team will review and verify your account within 24 hours of submission.
+                You'll receive an email notification once approved, and your buyer dashboard
+                will be activated immediately.
+              </p>
+            </div>
+          </div>
+
+          {/* Bottom trust badges */}
+          <div className="flex items-center justify-between gap-3 pt-8 mt-8" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+            <div className="flex flex-col items-center text-center gap-1.5 flex-1">
+              <ShieldCheck size={18} style={{ color: '#C8991A' }} />
+              <span className="text-[11px] leading-tight" style={{ color: '#B9C9BF' }}>Escrow-Protected Payments</span>
+            </div>
+            <div className="flex flex-col items-center text-center gap-1.5 flex-1">
+              <BadgeCheck size={18} style={{ color: '#C8991A' }} />
+              <span className="text-[11px] leading-tight" style={{ color: '#B9C9BF' }}>100% Verified Traders</span>
+            </div>
+            <div className="flex flex-col items-center text-center gap-1.5 flex-1">
+              <MapPinned size={18} style={{ color: '#C8991A' }} />
+              <span className="text-[11px] leading-tight" style={{ color: '#B9C9BF' }}>38 Countries Served</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════
+            RIGHT PANEL — FORM (unchanged logic)
+        ══════════════════════════════════════ */}
+        <div className="w-full lg:w-[54%] flex items-center justify-center py-12 px-4 lg:px-0" style={{ background: '#F2EFE9' }}>
+      <div className="w-full max-w-[480px] bg-white rounded-3xl lg:shadow-none shadow-2xl p-8" style={{ fontFamily: 'Barlow, sans-serif' }}>
         {/* Progress bar */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
@@ -713,6 +833,9 @@ export default function BuyerOnboarding() {
             )}
           </button>
         </div>
+      </div>
+        </div>
+        {/* end right panel */}
       </div>
 
       {/* Google Fonts import */}
