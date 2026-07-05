@@ -1161,6 +1161,7 @@ function DualCTABanner() {
    FOOTER
    ============================================================ */
 function Footer() {
+  const navigate = useNavigate();
   const [modal, setModal] = useState<{ type: "about" | "contact" | "terms" | "privacy" } | null>(null);
 
   const platformLinks = [
@@ -1174,8 +1175,8 @@ function Footer() {
   const companyLinks = [
     { label: "About Us",            action: () => setModal({ type: "about" }) },
     { label: "Contact Us",          action: () => setModal({ type: "contact" }) },
-    { label: "Terms & Conditions",  action: () => setModal({ type: "terms" }) },
-    { label: "Privacy Policy",      action: () => setModal({ type: "privacy" }) },
+    { label: "Terms & Conditions",    action: () => navigate("/terms") },
+    { label: "Privacy Policy",        action: () => navigate("/privacy") },
   ];
 
   return (
@@ -1354,16 +1355,7 @@ function Footer() {
           </div>
         ))}
       </Modal>
-      <Modal open={modal?.type === "terms"} onClose={() => setModal(null)} title="Terms & Conditions">
-        <p style={{ marginBottom: 14 }}>These terms and conditions outline the rules and regulations for the use of IziXport's platform and website.</p>
-        <p style={{ marginBottom: 14 }}>By accessing this website and creating an account, you accept these terms and conditions in full.</p>
-        <p>All trades conducted through IziXport are subject to our escrow protection policy and verification requirements. For legal inquiries, contact hello@izixport.com.</p>
-      </Modal>
-      <Modal open={modal?.type === "privacy"} onClose={() => setModal(null)} title="Privacy Policy">
-        <p style={{ marginBottom: 14 }}>IziXport is committed to protecting your personal information and your right to privacy.</p>
-        <p style={{ marginBottom: 14 }}>We collect only the information necessary to operate the platform — and we never sell your data to third parties.</p>
-        <p>All data is stored securely and processed in accordance with applicable data protection laws. Contact us at hello@izixport.com for any concerns.</p>
-      </Modal>
+       
     </>
   );
 }

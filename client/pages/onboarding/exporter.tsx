@@ -1,6 +1,7 @@
 // src/pages/onboarding/ExporterStep2.tsx
-// FIXED - Redirect works properly, added bank_name field
-// UPDATED - Desktop split-screen layout with left info panel
+// UPDATED — Export Readiness Checklist added (NEPC, product testing, freight forwarder, shipping experience)
+// Export readiness stored in exporter_profiles table
+// All existing CAC, NIN, bank verification logic preserved exactly
 
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -12,19 +13,9 @@ import {
   NINResult,
 } from '@/lib/dojah';
 import {
-  Building2,
-  Eye,
-  EyeOff,
-  Upload,
-  CheckCircle2,
-  AlertTriangle,
-  Banknote,
-  Loader2,
-  ChevronDown,
-  Check,
-  Lock,
-  ShieldCheck,
-  Globe,
+  Building2, Eye, EyeOff, Upload, CheckCircle2,
+  AlertTriangle, Banknote, Loader2, ChevronDown,
+  Check, Lock, ShieldCheck, Globe, ClipboardCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -34,6 +25,7 @@ const COLORS = {
   primaryLight: '#E6F2ED',
   accent: '#D4A843',
   white: '#FFFFFF',
+  gray300: '#D1D5DB', 
   gray50: '#F9FAFB',
   gray100: '#F3F4F6',
   gray200: '#E5E7EB',
@@ -78,6 +70,42 @@ const STATIC_BANKS: Bank[] = [
   { id: 24, code: '400001', name: 'Palmpay' },
 ].sort((a, b) => a.name.localeCompare(b.name));
 
+// ─── EXPORT READINESS CHECKLIST ITEM ────────────────────────────────────────
+interface ReadinessItem {
+  key: 'has_nepc_cert' | 'has_product_testing' | 'has_freight_forwarder' | 'has_shipped_before';
+  label: string;
+  description: string;
+  linkText?: string;
+  linkUrl?: string;
+}
+
+const READINESS_ITEMS: ReadinessItem[] = [
+  {
+    key: 'has_nepc_cert',
+    label: 'NEPC Exporter Registration',
+    description: 'Nigerian Export Promotion Council registration gives you access to export incentives and helps buyers trust your legitimacy.',
+    linkText: 'Register on NEPC →',
+    linkUrl: 'https://nepc.gov.ng',
+  },
+  {
+    key: 'has_product_testing',
+    label: 'Product Testing (NAFDAC / SON)',
+    description: 'Has your product been tested and certified by NAFDAC, SON, or any international quality body? Certified products attract more buyers.',
+    linkText: 'Learn about SON certification →',
+    linkUrl: 'https://son.gov.ng',
+  },
+  {
+    key: 'has_freight_forwarder',
+    label: 'Freight Forwarder',
+    description: 'Do you have a freight forwarder or shipping agent who handles customs and logistics for your exports?',
+  },
+  {
+    key: 'has_shipped_before',
+    label: 'Previous International Shipment',
+    description: 'Have you shipped goods internationally before? First-time exporters receive extra support from our admin team.',
+  },
+];
+
 export default function ExporterStep2() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +138,23 @@ export default function ExporterStep2() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // ─── EXPORT READINESS STATE ──────────────────────────────────────────────
+  const [readinessExpanded, setReadinessExpanded] = useState(false);
+  const [readiness, setReadiness] = useState<Record<string, boolean>>({
+    has_nepc_cert: false,
+    has_product_testing: false,
+    has_freight_forwarder: false,
+    has_shipped_before: false,
+  });
+  const [freightForwarderName, setFreightForwarderName] = useState('');
+
+  const readinessScore = Object.values(readiness).filter(Boolean).length;
+  const isExportReady = readinessScore === 4;
+
+  const toggleReadiness = (key: string) => {
+    setReadiness(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -121,20 +166,14 @@ export default function ExporterStep2() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Reset bank verified state when inputs change
   useEffect(() => {
     setBankVerified(false);
     setAccountName('');
     setBankError('');
   }, [bankCode, accountNumber]);
 
-  useEffect(() => {
-    if (cacResult) setCacResult(null);
-  }, [cacInput]);
-
-  useEffect(() => {
-    if (ninResult) setNinResult(null);
-  }, [ninInput]);
+  useEffect(() => { if (cacResult) setCacResult(null); }, [cacInput]);
+  useEffect(() => { if (ninResult) setNinResult(null); }, [ninInput]);
 
   const handleCACVerify = async () => {
     if (!cacInput.trim()) return;
@@ -142,13 +181,8 @@ export default function ExporterStep2() {
     const result = await verifyCACNumber(cacInput);
     setCacResult(result);
     setCacLoading(false);
-
-    if (!result.verified) {
-      toast.error(result.error || 'CAC verification failed');
-    }
-    if (result.error?.includes('Network') || result.error?.includes('fetch')) {
-      setDojahOffline(true);
-    }
+    if (!result.verified) toast.error(result.error || 'CAC verification failed');
+    if (result.error?.includes('Network') || result.error?.includes('fetch')) setDojahOffline(true);
   };
 
   const handleNINVerify = async () => {
@@ -157,29 +191,18 @@ export default function ExporterStep2() {
     const result = await verifyNINNumber(ninInput);
     setNinResult(result);
     setNinLoading(false);
-
-    if (!result.verified) {
-      toast.error(result.error || 'NIN verification failed');
-    }
-    if (result.error?.includes('Network') || result.error?.includes('fetch')) {
-      setDojahOffline(true);
-    }
+    if (!result.verified) toast.error(result.error || 'NIN verification failed');
+    if (result.error?.includes('Network') || result.error?.includes('fetch')) setDojahOffline(true);
   };
 
   const handleBankVerify = async () => {
-    if (!bankCode || !accountNumber) {
-      toast.error('Select a bank and enter an account number.');
-      return;
-    }
+    if (!bankCode || !accountNumber) { toast.error('Select a bank and enter an account number.'); return; }
     setBankLoading(true);
     setBankError('');
     try {
-      const { data, error } = await supabase.functions.invoke(
-        'resolve-bank-account',
-        {
-          body: { bank_code: bankCode, account_number: accountNumber },
-        }
-      );
+      const { data, error } = await supabase.functions.invoke('resolve-bank-account', {
+        body: { bank_code: bankCode, account_number: accountNumber },
+      });
       if (error) throw error;
       if (data.account_name) {
         setAccountName(data.account_name);
@@ -196,16 +219,10 @@ export default function ExporterStep2() {
     }
   };
 
-  const handleFileSelect = (
-    type: 'cac' | 'nepc',
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleFileSelect = (type: 'cac' | 'nepc', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File must be under 5MB');
-      return;
-    }
+    if (file.size > 5 * 1024 * 1024) { toast.error('File must be under 5MB'); return; }
     if (type === 'cac') setCacFile(file);
     else setNepcFile(file);
   };
@@ -213,59 +230,28 @@ export default function ExporterStep2() {
   const uploadFile = async (file: File, userId: string, prefix: string) => {
     const ext = file.name.split('.').pop();
     const path = `${userId}/${prefix}-${Date.now()}.${ext}`;
-    const { data, error } = await supabase.storage
-      .from('verifications')
-      .upload(path, file, { cacheControl: '3600', upsert: false });
-
+    const { data, error } = await supabase.storage.from('verifications').upload(path, file, { cacheControl: '3600', upsert: false });
     if (error) throw error;
-
-    const { data: urlData } = supabase.storage
-      .from('verifications')
-      .getPublicUrl(path);
-
+    const { data: urlData } = supabase.storage.from('verifications').getPublicUrl(path);
     return urlData.publicUrl;
   };
 
-  // ─── FIXED: handleSubmit with proper redirect ───
   const handleSubmit = async () => {
-    const canSubmitManually =
-      cacFile !== null &&
-      (!cacResult?.verified || !ninResult?.verified) &&
-      dojahOffline;
+    const canSubmitManually = cacFile !== null && (!cacResult?.verified || !ninResult?.verified) && dojahOffline;
+    const normalSubmission = cacResult?.verified && ninResult?.verified && cacFile;
 
-    const normalSubmission =
-      cacResult?.verified && ninResult?.verified && cacFile;
-
-    if (!bankVerified) {
-      toast.error('Please verify your bank account before submitting.');
-      return;
-    }
-
-    if (!normalSubmission && !canSubmitManually) {
-      toast.error('Complete all required steps first.');
-      return;
-    }
+    if (!bankVerified) { toast.error('Please verify your bank account before submitting.'); return; }
+    if (!normalSubmission && !canSubmitManually) { toast.error('Complete all required steps first.'); return; }
 
     setSubmitting(true);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        toast.error('Session expired. Please log in again.');
-        navigate('/login');
-        return;
-      }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Session expired. Please log in again.'); navigate('/login'); return; }
 
       const userId = session.user.id;
-
-      // Upload CAC document
       const cacUrl = await uploadFile(cacFile!, userId, 'cac');
       let nepcUrl: string | null = null;
-      if (nepcFile) {
-        nepcUrl = await uploadFile(nepcFile, userId, 'nepc');
-      }
+      if (nepcFile) nepcUrl = await uploadFile(nepcFile, userId, 'nepc');
 
       // Build verification record
       const verificationData: any = {
@@ -287,68 +273,57 @@ export default function ExporterStep2() {
         verificationData.cac_verified = false;
         verificationData.nin_verified = false;
         verificationData.status = 'pending_manual_review';
-        verificationData.admin_notes =
-          'Dojah unavailable during registration – manual review needed';
+        verificationData.admin_notes = 'Dojah unavailable during registration – manual review needed';
       }
 
-      const { error: verError } = await supabase
-        .from('verifications')
-        .insert(verificationData);
-
+      const { error: verError } = await supabase.from('verifications').insert(verificationData);
       if (verError) throw verError;
 
-      // ─── FIXED: Save bank account with bank_name ───
+      // Save bank account
       const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
-
-      const { error: bankErr } = await supabase
-        .from('user_bank_accounts')
-        .upsert(
-          {
-            user_id: userId,
-            bank_code: bankCode,
-            bank_name: selectedBankName,  // ← ADDED
-            account_number: accountNumber,
-            account_name: accountName,
-            is_verified: true,
-          },
-          { onConflict: 'user_id' }
-        );
-
+      const { error: bankErr } = await supabase.from('user_bank_accounts').upsert(
+        { user_id: userId, bank_code: bankCode, bank_name: selectedBankName, account_number: accountNumber, account_name: accountName, is_verified: true },
+        { onConflict: 'user_id' }
+      );
       if (bankErr) throw bankErr;
 
       // Update user profile
       const userUpdate: any = {
         verification_status: verificationData.status,
-        role: 'exporter',  // ← ENSURE role is set
+        role: 'exporter',
       };
-      if (cacResult?.company_name) {
-        userUpdate.company_name = cacResult.company_name;
-      }
-
-      const { error: userUpdateError } = await supabase
-        .from('users')
-        .update(userUpdate)
-        .eq('id', userId);
-
+      if (cacResult?.company_name) userUpdate.company_name = cacResult.company_name;
+      const { error: userUpdateError } = await supabase.from('users').update(userUpdate).eq('id', userId);
       if (userUpdateError) throw userUpdateError;
+
+      // ─── SAVE EXPORT READINESS TO exporter_profiles ─────────────────────
+      const exportReadyData = {
+        user_id: userId,
+        has_nepc_cert: readiness.has_nepc_cert,
+        has_product_testing: readiness.has_product_testing,
+        has_freight_forwarder: readiness.has_freight_forwarder,
+        freight_forwarder_name: readiness.has_freight_forwarder ? freightForwarderName.trim() || null : null,
+        has_shipped_before: readiness.has_shipped_before,
+        preferred_language: 'en',
+      };
+
+      const { error: profileError } = await supabase
+        .from('exporter_profiles')
+        .upsert(exportReadyData, { onConflict: 'user_id' });
+
+      // Non-fatal — don't block submission if this fails
+      if (profileError) console.warn('Export readiness save failed:', profileError);
 
       // Update auth metadata
       await supabase.auth.updateUser({ data: { role: 'exporter' } });
 
-      // Show success
       if (canSubmitManually) {
-        toast.success(
-          'Your documents and bank details have been submitted. Our team will review them within 24 hours.',
-          { duration: 5000 }
-        );
+        toast.success('Your documents and bank details have been submitted. Our team will review them within 24 hours.', { duration: 5000 });
       } else {
-        toast.success('Documents and bank details submitted! We\'ll verify within 24 hours.');
+        toast.success("Documents and bank details submitted! We'll verify within 24 hours.");
       }
 
-      // ─── FIXED: Reliable redirect to dashboard ───
-      setTimeout(() => {
-        window.location.href = '/dashboard/exporter';
-      }, 800);
+      setTimeout(() => { window.location.href = '/dashboard/exporter'; }, 800);
 
     } catch (err: any) {
       console.error('Submission error:', err);
@@ -368,78 +343,36 @@ export default function ExporterStep2() {
   return (
     <div className="min-h-screen bg-[#F2EFE9] py-8 px-4 flex items-center justify-center">
       <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-6 items-stretch">
-        {/* ─────────────────────────────────────────────
-            LEFT PANEL — Desktop Only
-            ───────────────────────────────────────────── */}
+
+        {/* ─── LEFT PANEL ─────────────────────────────────────────────────── */}
         <div
           className="hidden lg:flex lg:w-[44%] flex-col justify-between rounded-3xl p-10 text-white relative overflow-hidden"
-          style={{
-            background: 'linear-gradient(160deg, #002E1A 0%, #004D2E 100%)',
-            fontFamily: 'Barlow, sans-serif',
-          }}
+          style={{ background: 'linear-gradient(160deg, #002E1A 0%, #004D2E 100%)', fontFamily: 'Barlow, sans-serif' }}
         >
-          {/* Subtle dot pattern */}
-          <div
-            className="absolute inset-0 opacity-10 pointer-events-none"
-            style={{
-              backgroundImage:
-                'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.15) 1px, transparent 0)',
-              backgroundSize: '24px 24px',
-            }}
-          />
+          <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.15) 1px, transparent 0)', backgroundSize: '24px 24px' }} />
 
           <div className="relative z-10">
-            {/* Brand */}
             <div className="flex items-center gap-2 mb-8">
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ background: '#C8991A' }}
-              >
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#C8991A' }}>
                 <span className="text-white font-black text-sm">I</span>
               </div>
               <span className="font-bold text-lg tracking-tight">IziXport</span>
             </div>
 
-            {/* Badge */}
-            <div
-              className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6 border"
-              style={{
-                borderColor: 'rgba(200,153,26,0.4)',
-                background: 'rgba(200,153,26,0.1)',
-              }}
-            >
+            <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6 border" style={{ borderColor: 'rgba(200,153,26,0.4)', background: 'rgba(200,153,26,0.1)' }}>
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              <span
-                className="text-xs font-semibold uppercase tracking-widest"
-                style={{ color: '#C8991A' }}
-              >
-                Verified Exporter Onboarding
-              </span>
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#C8991A' }}>Verified Exporter Onboarding</span>
             </div>
 
-            {/* Headline */}
-            <h2
-              className="text-4xl font-black leading-tight mb-4"
-              style={{ fontFamily: 'Barlow Condensed, sans-serif' }}
-            >
+            <h2 className="text-4xl font-black leading-tight mb-4" style={{ fontFamily: 'Barlow Condensed, sans-serif' }}>
               Trade With <span style={{ color: '#C8991A' }}>Confidence.</span>
             </h2>
-            <p
-              className="text-sm leading-relaxed mb-8"
-              style={{ color: 'rgba(255,255,255,0.7)' }}
-            >
-              Join verified Nigerian exporters selling globally through full
-              escrow protection.
+            <p className="text-sm leading-relaxed mb-8" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              Join verified Nigerian exporters selling globally through full escrow protection.
             </p>
 
-            {/* Why Choose */}
             <div className="mb-6">
-              <h3
-                className="text-xs font-bold uppercase tracking-widest mb-3"
-                style={{ color: '#C8991A' }}
-              >
-                Why Choose IziXport
-              </h3>
+              <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: '#C8991A' }}>Why Choose IziXport</h3>
               <ul className="space-y-2.5">
                 {[
                   'Direct access to international buyers from 38+ countries',
@@ -447,135 +380,51 @@ export default function ExporterStep2() {
                   'Zero upfront listing fees or hidden charges',
                   'Every buyer is admin-verified before they can place orders',
                 ].map((item, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start gap-2 text-sm"
-                    style={{ color: 'rgba(255,255,255,0.8)' }}
-                  >
-                    <Check
-                      size={14}
-                      className="mt-0.5 shrink-0"
-                      style={{ color: '#C8991A' }}
-                    />
+                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.8)' }}>
+                    <Check size={14} className="mt-0.5 shrink-0" style={{ color: '#C8991A' }} />
                     <span>{item}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            {/* What You're Missing */}
-            <div
-              className="p-4 rounded-xl mb-6"
-              style={{
-                background: 'rgba(200,153,26,0.08)',
-                border: '1px solid rgba(200,153,26,0.2)',
-              }}
-            >
-              <h3
-                className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: '#C8991A' }}
-              >
-                What You're Missing
-              </h3>
-              <p
-                className="text-xs leading-relaxed"
-                style={{ color: 'rgba(255,255,255,0.65)' }}
-              >
-                Without completing verification, your profile remains invisible
-                to buyers, you cannot access escrow-protected deals, and you miss
-                out on premium international leads reviewed by our admin team.
+            <div className="p-4 rounded-xl mb-6" style={{ background: 'rgba(200,153,26,0.08)', border: '1px solid rgba(200,153,26,0.2)' }}>
+              <h3 className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#C8991A' }}>What You're Missing</h3>
+              <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                Without completing verification, your profile remains invisible to buyers, you cannot access escrow-protected deals, and you miss out on premium international leads reviewed by our admin team.
               </p>
             </div>
 
-            {/* Admin Review */}
-            <div
-              className="p-4 rounded-xl"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-              }}
-            >
-              <h3
-                className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: '#C8991A' }}
-              >
-                Admin Review
-              </h3>
-              <p
-                className="text-xs leading-relaxed"
-                style={{ color: 'rgba(255,255,255,0.65)' }}
-              >
-                Our admin team will review and verify your account within 24 hours
-                of submission. You'll receive an email notification once approved,
-                and your exporter dashboard will be activated immediately.
+            <div className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <h3 className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#C8991A' }}>Admin Review</h3>
+              <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                Our admin team will review and verify your account within 24 hours of submission. You'll receive an email notification once approved, and your exporter dashboard will be activated immediately.
               </p>
             </div>
           </div>
 
-          {/* Bottom trust badges */}
-          <div
-            className="relative z-10 mt-8 pt-6"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
-          >
+          <div className="relative z-10 mt-8 pt-6" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
             <div className="grid grid-cols-1 gap-3">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: 'rgba(255,255,255,0.08)' }}
-                >
-                  <Lock size={14} style={{ color: '#C8991A' }} />
+              {[
+                { icon: Lock, title: 'Escrow-Protected Payments', sub: 'Your funds are secure until delivery' },
+                { icon: ShieldCheck, title: '100% Verified Traders', sub: 'Every account manually reviewed' },
+                { icon: Globe, title: '38 Countries Served', sub: 'Global buyer network' },
+              ].map(({ icon: Icon, title, sub }) => (
+                <div key={title} className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                    <Icon size={14} style={{ color: '#C8991A' }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold">{title}</p>
+                    <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>{sub}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs font-semibold">Escrow-Protected Payments</p>
-                  <p
-                    className="text-[10px]"
-                    style={{ color: 'rgba(255,255,255,0.5)' }}
-                  >
-                    Your funds are secure until delivery
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: 'rgba(255,255,255,0.08)' }}
-                >
-                  <ShieldCheck size={14} style={{ color: '#C8991A' }} />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold">100% Verified Traders</p>
-                  <p
-                    className="text-[10px]"
-                    style={{ color: 'rgba(255,255,255,0.5)' }}
-                  >
-                    Every account manually reviewed
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: 'rgba(255,255,255,0.08)' }}
-                >
-                  <Globe size={14} style={{ color: '#C8991A' }} />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold">38 Countries Served</p>
-                  <p
-                    className="text-[10px]"
-                    style={{ color: 'rgba(255,255,255,0.5)' }}
-                  >
-                    Global buyer network
-                  </p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
 
-        {/* ─────────────────────────────────────────────
-            RIGHT PANEL — Onboarding Form
-            ───────────────────────────────────────────── */}
+        {/* ─── RIGHT PANEL — FORM ─────────────────────────────────────────── */}
         <div
           className="w-full max-w-lg lg:max-w-none lg:w-[56%] mx-auto lg:mx-0 bg-white rounded-3xl shadow-lg p-8"
           style={{ border: `1px solid ${COLORS.gray200}` }}
@@ -583,149 +432,71 @@ export default function ExporterStep2() {
           {/* Progress bar */}
           <div className="flex mb-8">
             <div className="flex-1">
-              <div
-                className="h-2 rounded-full"
-                style={{ background: COLORS.accent }}
-              />
-              <p
-                className="text-xs mt-2 font-medium"
-                style={{ color: COLORS.accent }}
-              >
-                Step 2 of 2
-              </p>
+              <div className="h-2 rounded-full" style={{ background: COLORS.accent }} />
+              <p className="text-xs mt-2 font-medium" style={{ color: COLORS.accent }}>Step 2 of 2</p>
             </div>
           </div>
 
-          <h2
-            className="text-3xl font-black mb-6"
-            style={{
-              fontFamily: 'Barlow Condensed, sans-serif',
-              color: COLORS.gray900,
-            }}
-          >
+          <h2 className="text-3xl font-black mb-6" style={{ fontFamily: 'Barlow Condensed, sans-serif', color: COLORS.gray900 }}>
             Verify Your Business
           </h2>
 
           {/* ── CAC ── */}
           <div className="mb-8">
-            <label
-              className="text-xs font-bold uppercase tracking-wider mb-2 block"
-              style={{ color: COLORS.accent }}
-            >
-              CAC Number
-            </label>
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>CAC Number</label>
             <div className="flex gap-2 mb-2">
               <div className="relative flex-1">
-                <Building2
-                  className="absolute left-3 top-1/2 -translate-y-1/2"
-                  style={{ color: COLORS.gray400 }}
-                  size={16}
-                />
-                <input
-                  type="text"
-                  placeholder="RC123456 or 123456"
-                  value={cacInput}
-                  onChange={(e) => setCacInput(e.target.value)}
-                  className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
-                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                  disabled={cacLoading}
-                />
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
+                <input type="text" placeholder="RC123456 or 123456" value={cacInput} onChange={(e) => setCacInput(e.target.value)} className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={cacLoading} />
               </div>
-              <button
-                onClick={handleCACVerify}
-                disabled={cacLoading || !cacInput.trim()}
-                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
-                style={{
-                  border: `1px solid ${COLORS.accent}`,
-                  color: COLORS.accent,
-                  background: 'transparent',
-                }}
-              >
+              <button onClick={handleCACVerify} disabled={cacLoading || !cacInput.trim()} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
                 {cacLoading ? 'Verifying…' : 'Verify CAC →'}
               </button>
             </div>
-            {import.meta.env.DEV && (
-              <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
-                🧪 Sandbox test: RC1234567
-              </p>
-            )}
-            <p className="text-xs" style={{ color: COLORS.gray400 }}>
-              Your Corporate Affairs Commission registration number
-            </p>
-
+            {import.meta.env.DEV && <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>🧪 Sandbox test: RC1234567</p>}
+            <p className="text-xs" style={{ color: COLORS.gray400 }}>Your Corporate Affairs Commission registration number</p>
             {cacResult?.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
                 <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-                <p className="font-bold" style={{ color: COLORS.gray800 }}>
-                  {cacResult.company_name}
-                </p>
-                <p className="text-sm" style={{ color: '#059669' }}>
-                  {cacResult.company_type} · Registered {cacResult.registration_date}
-                </p>
+                <p className="font-bold" style={{ color: COLORS.gray800 }}>{cacResult.company_name}</p>
+                <p className="text-sm" style={{ color: '#059669' }}>{cacResult.company_type} · Registered {cacResult.registration_date}</p>
               </div>
             )}
             {cacResult && !cacResult.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-                <p className="text-sm text-red-700">
-                  {cacResult.error || 'CAC not found'}
-                </p>
+                <p className="text-sm text-red-700">{cacResult.error || 'CAC not found'}</p>
               </div>
             )}
           </div>
 
           {/* ── NIN ── */}
           <div className="mb-8">
-            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-              NIN Number
-            </label>
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>NIN Number</label>
             <div className="flex gap-2 mb-2">
               <div className="relative flex-1">
-                <input
-                  type={showNIN ? 'text' : 'password'}
-                  placeholder="11-digit NIN number"
-                  value={ninInput}
-                  onChange={(e) => setNinInput(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
-                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                  disabled={ninLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNIN(!showNIN)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
-                  style={{ color: COLORS.gray400 }}
-                >
+                <input type={showNIN ? 'text' : 'password'} placeholder="11-digit NIN number" value={ninInput} onChange={(e) => setNinInput(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={ninLoading} />
+                <button type="button" onClick={() => setShowNIN(!showNIN)} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }}>
                   {showNIN ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              <button
-                onClick={handleNINVerify}
-                disabled={ninLoading || !ninInput.trim()}
-                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
-                style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
-              >
+              <button onClick={handleNINVerify} disabled={ninLoading || !ninInput.trim()} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
                 {ninLoading ? 'Verifying…' : 'Verify NIN →'}
               </button>
             </div>
-            {import.meta.env.DEV && (
-              <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>
-                🧪 Sandbox test: 12345678901
-              </p>
-            )}
+            {import.meta.env.DEV && <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>🧪 Sandbox test: 12345678901</p>}
             <p className="text-xs flex items-center gap-1" style={{ color: COLORS.gray400 }}>
               <AlertTriangle className="w-3 h-3" /> Your NIN is verified and immediately discarded. Never stored.
             </p>
-
             {ninResult?.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
                 <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
                 <p className="font-bold" style={{ color: COLORS.gray800 }}>Identity Verified</p>
                 <p className="text-sm" style={{ color: '#059669' }}>Your NIN has been verified and discarded.</p>
               </div>
             )}
             {ninResult && !ninResult.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
                 <p className="text-sm text-red-700">{ninResult.error || 'NIN verification failed'}</p>
               </div>
@@ -734,35 +505,18 @@ export default function ExporterStep2() {
 
           {/* ── Bank Account Details ── */}
           <div className="mb-8">
-            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-              Bank Account for Escrow Payouts
-            </label>
-            <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>
-              We’ll send your earnings here after delivery is confirmed.
-            </p>
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>Bank Account for Escrow Payouts</label>
+            <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>We'll send your earnings here after delivery is confirmed.</p>
 
             <div className="mb-3 relative" ref={dropdownRef}>
-              <button
-                type="button"
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
-                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-              >
-                <span className={selectedBankName ? '' : 'text-gray-400'}>
-                  {selectedBankName || 'Select your bank'}
-                </span>
+              <button type="button" onClick={() => setDropdownOpen(!dropdownOpen)} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                <span className={selectedBankName ? '' : 'text-gray-400'}>{selectedBankName || 'Select your bank'}</span>
                 <ChevronDown size={16} className="text-gray-400" />
               </button>
-
               {dropdownOpen && (
                 <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto" style={{ borderRadius: 12 }}>
                   {banks.map((bank) => (
-                    <div
-                      key={bank.code}
-                      onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }}
-                      className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`}
-                      style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                    >
+                    <div key={bank.code} onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }} className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`} style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
                       {bank.name}
                     </div>
                   ))}
@@ -773,37 +527,22 @@ export default function ExporterStep2() {
             <div className="flex gap-2 mb-2">
               <div className="relative flex-1">
                 <Banknote className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={10}
-                  placeholder="Account number (10 digits)"
-                  value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
-                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-                  disabled={bankLoading}
-                />
+                <input type="text" inputMode="numeric" maxLength={10} placeholder="Account number (10 digits)" value={accountNumber} onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={bankLoading} />
               </div>
-              <button
-                onClick={handleBankVerify}
-                disabled={bankLoading || !bankCode || accountNumber.length !== 10}
-                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
-                style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
-              >
+              <button onClick={handleBankVerify} disabled={bankLoading || !bankCode || accountNumber.length !== 10} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
                 {bankLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Verify Account →'}
               </button>
             </div>
 
             {bankVerified && accountName && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: `1px solid #A7F3D0` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
                 <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
                 <p className="font-bold" style={{ color: COLORS.gray800 }}>{accountName}</p>
                 <p className="text-sm" style={{ color: '#059669' }}>Account verified successfully</p>
               </div>
             )}
             {bankError && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: `1px solid #FECACA` }}>
+              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
                 <p className="text-sm text-red-700">{bankError}</p>
               </div>
@@ -812,19 +551,113 @@ export default function ExporterStep2() {
 
           {/* Dojah offline fallback */}
           {dojahOffline && (
-            <div className="mb-8 p-4 rounded-xl" style={{ background: '#FEF3C7', border: `1px solid #FDE68A`, color: '#92400E' }}>
+            <div className="mb-8 p-4 rounded-xl" style={{ background: '#FEF3C7', border: '1px solid #FDE68A', color: '#92400E' }}>
               <AlertTriangle className="w-5 h-5 mb-2" />
               <p className="font-semibold text-sm">Automated verification is temporarily unavailable.</p>
               <p className="text-xs mt-1">Your documents will be reviewed manually by our team within 24 hours. You can still submit now.</p>
             </div>
           )}
 
+          {/* ─── EXPORT READINESS CHECKLIST ─────────────────────────────── */}
+          <div className="mb-8">
+            <div
+              onClick={() => setReadinessExpanded(!readinessExpanded)}
+              className="flex items-center justify-between cursor-pointer p-4 rounded-xl"
+              style={{ background: readinessExpanded ? COLORS.primaryLight : COLORS.gray50, border: `1px solid ${readinessExpanded ? '#A7F3D0' : COLORS.gray200}`, transition: 'all 0.2s' }}
+            >
+              <div className="flex items-center gap-3">
+                <ClipboardCheck size={18} style={{ color: isExportReady ? COLORS.primary : COLORS.accent }} />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider" style={{ color: COLORS.accent }}>Export Readiness</p>
+                  <p className="text-sm font-semibold" style={{ color: COLORS.gray700 }}>
+                    {readinessScore}/4 complete
+                    {isExportReady ? ' — Export Ready! 🏅' : ' (optional but recommended)'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {isExportReady && (
+                  <span className="text-xs font-bold px-2 py-1 rounded-full" style={{ background: COLORS.primaryLight, color: COLORS.primary }}>
+                    Ready
+                  </span>
+                )}
+                <ChevronDown size={16} style={{ color: COLORS.gray400, transform: readinessExpanded ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s' }} />
+              </div>
+            </div>
+
+            {readinessExpanded && (
+              <div className="mt-3 space-y-3">
+                {/* Progress bar */}
+                <div style={{ height: 6, background: COLORS.gray100, borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${(readinessScore / 4) * 100}%`, background: `linear-gradient(90deg, ${COLORS.primary}, #00994D)`, borderRadius: 999, transition: 'width 0.3s' }} />
+                </div>
+
+                <p className="text-xs" style={{ color: COLORS.gray500 }}>
+                  Exporters with all 4 items get an "Export Ready" badge on their profile — helping them stand out to international buyers.
+                </p>
+
+                {READINESS_ITEMS.map((item) => (
+                  <div
+                    key={item.key}
+                    className="p-4 rounded-xl"
+                    style={{ background: readiness[item.key] ? '#ECFDF5' : COLORS.gray50, border: `1px solid ${readiness[item.key] ? '#A7F3D0' : COLORS.gray200}`, transition: 'all 0.2s' }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleReadiness(item.key)}
+                        style={{
+                          width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                          background: readiness[item.key] ? COLORS.primary : 'transparent',
+                          border: `2px solid ${readiness[item.key] ? COLORS.primary : COLORS.gray300}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer', transition: 'all 0.15s', marginTop: 1,
+                        }}
+                      >
+                        {readiness[item.key] && <Check size={13} color="white" />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: COLORS.gray800 }}>{item.label}</p>
+                        <p className="text-xs mt-1 leading-relaxed" style={{ color: COLORS.gray500 }}>{item.description}</p>
+                        {item.linkText && item.linkUrl && (
+                          <a href={item.linkUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold mt-1 inline-block" style={{ color: COLORS.accent }}>
+                            {item.linkText}
+                          </a>
+                        )}
+                        {/* Freight forwarder name input */}
+                        {item.key === 'has_freight_forwarder' && readiness.has_freight_forwarder && (
+                          <input
+                            type="text"
+                            placeholder="Freight forwarder name (optional)"
+                            value={freightForwarderName}
+                            onChange={(e) => setFreightForwarderName(e.target.value)}
+                            className="mt-2 w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-[#006B3F] outline-none text-xs"
+                            style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {isExportReady && (
+                  <div className="p-3 rounded-xl text-center" style={{ background: COLORS.primaryLight, border: `1px solid ${COLORS.primary}30` }}>
+                    <p className="text-sm font-bold" style={{ color: COLORS.primary }}>
+                      🏅 You qualify for the Export Ready badge on your profile!
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: COLORS.gray600 }}>
+                      This badge is displayed to buyers and increases trust significantly.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Documents */}
           <div className="mb-8">
-            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>
-              Supporting Documents
-            </label>
-            <div className="p-4 rounded-xl mb-4 text-xs" style={{ background: '#EFF6FF', border: `1px solid #BFDBFE`, color: '#1E40AF' }}>
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>Supporting Documents</label>
+            <div className="p-4 rounded-xl mb-4 text-xs" style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1E40AF' }}>
               Our team visually reviews your CAC certificate to confirm authenticity. Documents are permanently deleted within 24 hours of review.
             </div>
 
@@ -879,18 +712,14 @@ export default function ExporterStep2() {
           background: linear-gradient(90deg, #004D2E 0%, #006B3F 30%, #00994D 50%, #006B3F 70%, #004D2E 100%);
           background-size: 200% auto;
           animation: btnShimmer 3s linear infinite;
-          color: white;
-          border: none;
-          cursor: pointer;
+          color: white; border: none; cursor: pointer;
           transition: filter 0.18s, transform 0.12s, box-shadow 0.18s;
         }
         .btn-primary:hover:not(:disabled) {
           filter: brightness(1.08);
           box-shadow: 0 6px 24px rgba(0,107,63,0.25);
         }
-        .btn-primary:active:not(:disabled) {
-          transform: scale(0.97);
-        }
+        .btn-primary:active:not(:disabled) { transform: scale(0.97); }
       `}</style>
     </div>
   );

@@ -30,7 +30,10 @@ const ExporterTrack = lazy(() => import("./pages/dashboard/ExporterTrack"));
 const AddListing = lazy(() => import("./pages/dashboard/AddListing"));
 const BankDetails = lazy(() => import("./pages/dashboard/BankDetails"));
 const DealRoom = lazy(() => import("./pages/deal/DealRoom"));
-const ReviewsPage = lazy(() => import("./pages/ReviewsPage"));  // <-- Added
+const ReviewsPage = lazy(() => import("./pages/ReviewsPage"));
+// ── LEGAL PAGES ─────────────────────────────────────────────────────────────
+const TermsPage = lazy(() => import("./pages/TermsPage"));
+const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
 // ──────────────────────────────────────────────────────────────────────────────
 
 const queryClient = new QueryClient();
@@ -70,6 +73,10 @@ const App = () => (
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/how-it-works" element={<HowItWorksPage />} />
+
+            {/* ── Legal pages ─────────────────────────────── */}
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
 
             {/* ── Onboarding ────────────────────────────────── */}
             <Route path="/onboarding/exporter" element={<ExporterOnboarding />} />
