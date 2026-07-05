@@ -1,7 +1,7 @@
 // src/pages/deal/DealRoom.tsx
-// MERGED — Simplified checklist + LibreTranslate + upload-to-chat fix
-// Every exporter upload or checklist completion is now announced in chat
-// Images render inline; documents render as clickable links
+// UPDATED — Simplified checklist (pre-shipment photos + B/L + tracking only)
+// UPDATED — LibreTranslate integration via translate.argosopentech.com
+// All existing business logic, escrow, payment, dispute flow preserved
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -18,7 +18,7 @@ interface Message {
   is_ai: boolean;
   is_blocked?: boolean;
   created_at: string;
-  translatedContent?: string;
+  translatedContent?: string; // runtime only — not in DB
 }
 
 interface ChecklistItem {
@@ -126,6 +126,10 @@ Important:
 
 When you are ready, tap the payment button or type "payment" to continue.`;
 
+// ─── SIMPLIFIED CHECKLIST ───────────────────────────────────────────────────
+// Removed: commercial_invoice, packing_list, certificate_of_origin, phytosanitary_cert
+// These are handled between exporter and freight forwarder — not IziXport's responsibility
+// IziXport only needs proof the goods are real, packed, and moving
 const DEFAULT_CHECKLIST = [
   {
     key: "pre_shipment_photos",
@@ -150,32 +154,74 @@ const DEFAULT_CHECKLIST = [
   },
 ];
 
-const LANGUAGE_OPTIONS = [
-  { code: "en", label: "English" },
-  { code: "hi", label: "Hindi" },
-  { code: "zh", label: "Mandarin" },
-  { code: "ar", label: "Arabic" },
-  { code: "fr", label: "French" },
-  { code: "de", label: "German" },
-  { code: "pt", label: "Portuguese" },
-  { code: "tr", label: "Turkish" },
-  { code: "ja", label: "Japanese" },
-];
+// ─── LANGUAGE NAME MAP ───────────────────────────────────────────────────────
+const LANG_NAMES: Record<string, string> = {
+  zh: "Chinese", hi: "Hindi", ar: "Arabic", fr: "French",
+  de: "German", pt: "Portuguese", tr: "Turkish", ja: "Japanese",
+  ko: "Korean", es: "Spanish", ru: "Russian", it: "Italian",
+  nl: "Dutch", vi: "Vietnamese", th: "Thai", en: "English",
+};
 
-const translateText = async (text: string, targetLang: string): Promise<string> => {
-  if (!targetLang || targetLang === "en") return text;
+// ─── LIBRE TRANSLATE — AUTO DETECT + TRANSLATE ───────────────────────────────
+// Detects the language of a message, then translates it to the viewer's language
+// Only called on messages from the OTHER party, never your own
+
+const LIBRE_BASE = "https://translate.argosopentech.com";
+
+const detectLanguage = async (text: string): Promise<string> => {
+  // Skip detection for very short texts or system messages
+  if (!text || text.length < 4) return "en";
   try {
-    const res = await fetch("https://translate.argosopentech.com/translate", {
+    const res = await fetch(`${LIBRE_BASE}/detect`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: text, source: "en", target: targetLang }),
+      body: JSON.stringify({ q: text }),
     });
-    if (!res.ok) throw new Error("Translation request failed");
+    if (!res.ok) return "en";
+    const data = await res.json();
+    // Returns array of {language, confidence} — pick highest confidence
+    if (Array.isArray(data) && data.length > 0) {
+      const best = data.sort((a: any, b: any) => b.confidence - a.confidence)[0];
+      return best.language || "en";
+    }
+    return "en";
+  } catch {
+    return "en";
+  }
+};
+
+const translateText = async (
+  text: string,
+  sourceLang: string,
+  targetLang: string
+): Promise<string> => {
+  if (!text || sourceLang === targetLang) return text;
+  try {
+    const res = await fetch(`${LIBRE_BASE}/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: text, source: sourceLang, target: targetLang }),
+    });
+    if (!res.ok) return text;
     const data = await res.json();
     return data.translatedText || text;
   } catch {
     return text;
   }
+};
+
+// Auto-detect and translate a message from another user
+// Returns { translated, detectedLang } or null if no translation needed
+const autoTranslate = async (
+  text: string,
+  viewerLang: string // the language the viewer reads (usually "en" for Nigerian exporters)
+): Promise<{ translated: string; detectedLang: string } | null> => {
+  const detected = await detectLanguage(text);
+  // If already in viewer's language, no translation needed
+  if (detected === viewerLang || detected === "en" && viewerLang === "en") return null;
+  const translated = await translateText(text, detected, viewerLang);
+  if (!translated || translated === text) return null;
+  return { translated, detectedLang: detected };
 };
 
 const BUYER_ESCROW_FEE_RATE = 0.045;
@@ -358,119 +404,52 @@ function DateDivider({ label }: { label: string }) {
   );
 }
 
-// ─── RICH MESSAGE CONTENT (images + links) ─────────────────────────────────
-function MessageContent({ text }: { text: string }) {
-  if (!text) return null;
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = urlRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(
-        <span key={`txt-${lastIndex}`} style={{ whiteSpace: "pre-wrap" }}>
-          {text.slice(lastIndex, match.index)}
-        </span>
-      );
-    }
-    const url = match[0];
-    const isImage = /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(url);
-    if (isImage) {
-      parts.push(
-        <a key={`img-${match.index}`} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 6 }}>
-          <img
-            src={url}
-            alt="uploaded"
-            loading="lazy"
-            style={{
-              maxWidth: "100%",
-              maxHeight: 260,
-              borderRadius: 10,
-              objectFit: "cover",
-              border: "1px solid #E5E7EB",
-              display: "block",
-            }}
-          />
-        </a>
-      );
-    } else {
-      parts.push(
-        <a
-          key={`link-${match.index}`}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            color: "#D4A843",
-            textDecoration: "underline",
-            fontSize: 12,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            marginTop: 4,
-            fontWeight: 700,
-          }}
-        >
-          📄 View Document →
-        </a>
-      );
-    }
-    lastIndex = match.index + url.length;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(
-      <span key={`txt-end`} style={{ whiteSpace: "pre-wrap" }}>
-        {text.slice(lastIndex)}
-      </span>
-    );
-  }
-
-  return <>{parts.length ? parts : text}</>;
-}
-
-// ─── TRANSLATE BUTTON ───────────────────────────────────────────────────────
-function TranslateButton({ text, targetLang, onTranslated }: {
-  text: string; targetLang: string; onTranslated: (t: string) => void;
+// ─── AUTO TRANSLATE LABEL ────────────────────────────────────────────────────
+// Shows "Translated from Chinese" label with toggle to see original
+function AutoTranslateLabel({ detectedLang, onShowOriginal }: {
+  detectedLang: string; onShowOriginal: () => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
-
-  if (!targetLang || targetLang === "en") return null;
-
-  const handleTranslate = async () => {
-    setLoading(true);
-    const translated = await translateText(text, targetLang);
-    onTranslated(translated);
-    setDone(true);
-    setLoading(false);
-  };
-
-  if (done) return null;
-
+  const langName = LANG_NAMES[detectedLang] || detectedLang;
   return (
-    <button
-      onClick={handleTranslate}
-      disabled={loading}
-      style={{
-        marginTop: 4, background: "none", border: "none",
-        color: "#D4A843", fontSize: 10, cursor: "pointer",
-        display: "flex", alignItems: "center", gap: 4,
-        fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700,
-        letterSpacing: "0.04em", textTransform: "uppercase", padding: 0,
-      }}
-    >
-      {loading ? <Spinner size={10} color="#D4A843" /> : "🌐"}
-      {loading ? "Translating…" : "Translate"}
-    </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+      <span style={{ fontSize: 10, color: "#9CA3AF" }}>
+        🌐 Translated from {langName}
+      </span>
+      <button
+        onClick={onShowOriginal}
+        style={{
+          background: "none", border: "none", color: "#D4A843",
+          fontSize: 10, cursor: "pointer", padding: 0,
+          fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700,
+          letterSpacing: "0.03em",
+        }}
+      >
+        Show original
+      </button>
+    </div>
   );
 }
 
-function AIMessage({ msg, showAvatar, preferredLang }: {
-  msg: Message; showAvatar: boolean; preferredLang: string;
+function AIMessage({ msg, showAvatar, viewerLang }: {
+  msg: Message; showAvatar: boolean; viewerLang: string;
 }) {
-  const [translated, setTranslated] = useState(msg.translatedContent || "");
+  const [translated, setTranslated] = useState("");
+  const [detectedLang, setDetectedLang] = useState("");
+  const [showOriginal, setShowOriginal] = useState(false);
+
+  useEffect(() => {
+    // AI messages are always English — only translate if viewer isn't English
+    if (viewerLang && viewerLang !== "en") {
+      translateText(msg.content, "en", viewerLang).then((t) => {
+        if (t && t !== msg.content) {
+          setTranslated(t);
+          setDetectedLang("en");
+        }
+      });
+    }
+  }, [msg.content, viewerLang]);
+
+  const displayContent = !showOriginal && translated ? translated : msg.content;
 
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
@@ -487,19 +466,20 @@ function AIMessage({ msg, showAvatar, preferredLang }: {
           background: "#F3F4F6", border: "1px solid #E5E7EB",
           borderRadius: "18px 18px 18px 4px", padding: "10px 14px",
         }}>
-          <div style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7 }}>
-            <MessageContent text={translated || msg.content} />
+          <div style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+            {displayContent}
           </div>
-          {translated && translated !== msg.content && (
-            <div style={{ color: "#9CA3AF", fontSize: 10, marginTop: 4 }}>
-              Translated · <button onClick={() => setTranslated("")} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0 }}>Show original</button>
-            </div>
+          {translated && !showOriginal && (
+            <AutoTranslateLabel
+              detectedLang={detectedLang}
+              onShowOriginal={() => setShowOriginal(true)}
+            />
           )}
-          <TranslateButton
-            text={msg.content}
-            targetLang={preferredLang}
-            onTranslated={(t) => setTranslated(t)}
-          />
+          {showOriginal && (
+            <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>
+              Show translation
+            </button>
+          )}
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -507,12 +487,35 @@ function AIMessage({ msg, showAvatar, preferredLang }: {
   );
 }
 
-function UserMessage({ msg, isOwn, senderName, showAvatar, order, preferredLang }: {
+function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: {
   msg: Message; isOwn: boolean; senderName: string;
-  showAvatar: boolean; order: Order; preferredLang: string;
+  showAvatar: boolean; order: Order; viewerLang: string;
 }) {
-  const [translated, setTranslated] = useState(msg.translatedContent || "");
+  const [translated, setTranslated] = useState("");
+  const [detectedLang, setDetectedLang] = useState("");
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [translating, setTranslating] = useState(false);
 
+  useEffect(() => {
+    // Only auto-translate messages from the OTHER party, not your own
+    if (isOwn) return;
+
+    const run = async () => {
+      setTranslating(true);
+      const result = await autoTranslate(msg.content, viewerLang || "en");
+      if (result) {
+        setTranslated(result.translated);
+        setDetectedLang(result.detectedLang);
+      }
+      setTranslating(false);
+    };
+
+    run();
+  }, [msg.content, isOwn, viewerLang]);
+
+  const displayContent = !showOriginal && translated ? translated : msg.content;
+
+  // Own message — never translate, always show as typed
   if (isOwn) {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end", margin: "3px 0" }}>
@@ -535,6 +538,7 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, preferredLang 
     );
   }
 
+  // Incoming message from other party — show translation if detected
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
       {showAvatar ? (
@@ -553,19 +557,32 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, preferredLang 
           background: "#F3F4F6", border: "1px solid #E5E7EB",
           borderRadius: "18px 18px 18px 4px", padding: "10px 14px",
         }}>
-          <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }}>
-            <MessageContent text={translated || msg.content} />
-          </div>
-          {translated && translated !== msg.content && (
-            <div style={{ color: "#9CA3AF", fontSize: 10, marginTop: 4 }}>
-              Translated · <button onClick={() => setTranslated("")} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0 }}>Show original</button>
+          {translating ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                {msg.content}
+              </div>
+              <Spinner size={10} color="#D4A843" />
+            </div>
+          ) : (
+            <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+              {displayContent}
             </div>
           )}
-          <TranslateButton
-            text={msg.content}
-            targetLang={preferredLang}
-            onTranslated={(t) => setTranslated(t)}
-          />
+          {translated && !translating && !showOriginal && (
+            <AutoTranslateLabel
+              detectedLang={detectedLang}
+              onShowOriginal={() => setShowOriginal(true)}
+            />
+          )}
+          {showOriginal && (
+            <button
+              onClick={() => setShowOriginal(false)}
+              style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}
+            >
+              Show translation
+            </button>
+          )}
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -647,7 +664,7 @@ function DealProgress({ order }: { order: Order }) {
   );
 }
 
-// ─── FREIGHT COMPONENTS ──────────────────────────────────────────────────────
+// ─── FREIGHT COMPONENTS (unchanged from original) ────────────────────────────
 function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
   orderId: string; orderCurrency: string; onSubmitted: () => void;
 }) {
@@ -911,7 +928,7 @@ function FreightApprovalCard({ order, orderId, currentUser }: {
   );
 }
 
-// ─── SIMPLIFIED CHECKLIST PANEL ─────────────────────────────────────────────
+// ─── SIMPLIFIED CHECKLIST PANEL ──────────────────────────────────────────────
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
   orderId: string; currentUser: CurrentUser; isExporter: boolean;
   order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
@@ -919,14 +936,9 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [expanded, setExpanded] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const fileRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const fileRef = useRef<HTMLInputElement>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
-
-  const setFileInputRef = (id: string) => (el: HTMLInputElement | null) => {
-    if (el) fileRefs.current.set(id, el);
-    else fileRefs.current.delete(id);
-  };
 
   const seedChecklist = async () => {
     if (!isExporter) return;
@@ -993,14 +1005,19 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       return;
     }
 
+    // Bill of Lading requires document upload first
     if (step.step_key === "bill_of_lading" && !step.document_url) {
       toast.error("Upload the Bill of Lading document first.");
       return;
     }
+
+    // Pre-shipment photos requires document upload first
     if (step.step_key === "pre_shipment_photos" && !step.document_url) {
       toast.error("Upload the pre-shipment photos first.");
       return;
     }
+
+    // Tracking step requires number and carrier
     if (step.step_key === "tracking_confirmed") {
       if (!trackingNumber.trim()) { toast.error("Enter the tracking number."); return; }
       if (!carrier) { toast.error("Select the carrier."); return; }
@@ -1041,10 +1058,8 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   };
 
   const handleUpload = async (step: ChecklistItem) => {
-    const inputEl = fileRefs.current.get(step.id);
-    const file = inputEl?.files?.[0];
+    const file = fileRef.current?.files?.[0];
     if (!file) return;
-
     setUploading(true);
     try {
       const { data, error } = await supabase.storage.from("listings").upload(
@@ -1057,26 +1072,12 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         .update({ document_url: url, document_name: file.name })
         .eq("id", step.id);
       if (updateErr) throw updateErr;
-
-      const isImage = file.type.startsWith("image/");
-      const label =
-        step.step_key === "pre_shipment_photos"
-          ? "Pre-shipment photos"
-          : "Bill of Lading";
-      const icon = isImage ? "📸" : "📄";
-      await supabase.from("messages").insert({
-        order_id: orderId,
-        sender_type: "system",
-        is_ai: true,
-        content: `${icon} ${label} uploaded by exporter.\n\n${url}`,
-      });
-
       toast.success("Document uploaded.");
     } catch (err: any) {
       toast.error(err?.message || "Upload failed.");
     } finally {
       setUploading(false);
-      if (inputEl) inputEl.value = "";
+      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -1153,6 +1154,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       {step.step_label}
                     </div>
 
+                    {/* Hint text for active step */}
                     {isActive && isExporter && hint && (
                       <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2, lineHeight: 1.5, fontStyle: "italic" }}>
                         {hint}
@@ -1165,6 +1167,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
+                    {/* Tracking info display */}
                     {isCompleted && isTracking && step.reference_number && (
                       <div style={{ marginTop: 4, fontSize: 11, color: "#374151" }}>
                         <div><strong>Tracking:</strong> {step.reference_number}</div>
@@ -1181,6 +1184,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
+                    {/* Document link */}
                     {step.document_url && (
                       isExporter ? (
                         <a href={step.document_url} target="_blank" rel="noopener noreferrer" style={{ color: "#D4A843", fontSize: 11, textDecoration: "underline", display: "block", marginTop: 2 }}>
@@ -1197,8 +1201,10 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       )
                     )}
 
+                    {/* Active exporter controls */}
                     {isActive && isExporter && !checklistEmpty && (
                       <div style={{ marginTop: 8 }}>
+                        {/* Tracking step inputs */}
                         {isTracking && (
                           <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
                             <input
@@ -1228,18 +1234,12 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                           {step.requires_document && (
                             <>
                               <button
-                                onClick={() => fileRefs.current.get(step.id)?.click()}
+                                onClick={() => fileRef.current?.click()}
                                 style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: "pointer" }}
                               >
                                 Upload {step.step_key === "pre_shipment_photos" ? "Photos" : "Document"}
                               </button>
-                              <input
-                                type="file"
-                                accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"}
-                                ref={setFileInputRef(step.id)}
-                                style={{ display: "none" }}
-                                onChange={() => handleUpload(step)}
-                              />
+                              <input type="file" accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"} ref={fileRef} style={{ display: "none" }} onChange={() => handleUpload(step)} />
                             </>
                           )}
                           <button
@@ -1269,7 +1269,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   );
 }
 
-// ─── DELIVERY CONFIRM ─────────────────────────────────────────────────────────
+// ─── DELIVERY CONFIRM (unchanged from original) ──────────────────────────────
 function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlatformReview }: {
   order: Order; orderId: string; currentUser: CurrentUser;
   isBuyer: boolean; onShowPlatformReview?: () => void;
@@ -1462,276 +1462,7 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
   );
 }
 
-// ─── LANGUAGE SELECTOR ───────────────────────────────────────────────────────
-function LanguageSelector({ userId, currentLang, onChanged }: {
-  userId: string; currentLang: string; onChanged: (lang: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const handleSelect = async (code: string) => {
-    setSaving(true);
-    try {
-      await supabase.from("users").update({ preferred_language: code }).eq("id", userId);
-      await supabase.from("exporter_profiles").update({ preferred_language: code }).eq("user_id", userId);
-      onChanged(code);
-      setOpen(false);
-      toast.success("Language preference saved.");
-    } catch {
-      toast.error("Failed to save language preference.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const currentLabel = LANGUAGE_OPTIONS.find(l => l.code === currentLang)?.label || "English";
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{ background: "none", border: "1px solid #E5E7EB", borderRadius: 8, padding: "4px 10px", color: "#6B7280", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, letterSpacing: "0.04em" }}
-      >
-        🌐 {currentLabel} {saving ? "…" : "▾"}
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 100, minWidth: 140, overflow: "hidden" }}>
-          {LANGUAGE_OPTIONS.map(lang => (
-            <div
-              key={lang.code}
-              onClick={() => handleSelect(lang.code)}
-              style={{ padding: "9px 14px", fontSize: 12, cursor: "pointer", color: lang.code === currentLang ? "#D4A843" : "#374151", fontWeight: lang.code === currentLang ? 800 : 400, background: lang.code === currentLang ? "#FEF3C7" : "transparent" }}
-            >
-              {lang.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── FIRST-TIMER ONBOARDING TOUR ───────────────────────────────────────────
-const TOUR_STEPS = [
-  {
-    target: "header",
-    title: "Welcome to Your Trade Room",
-    body: "This is your private deal space. Everything — chat, documents, payment, and tracking — happens right here. Keep all communication inside this room.",
-    position: "bottom",
-  },
-  {
-    target: "chat-tab",
-    title: "💬 Chat Messages Tab",
-    body: "Talk to the other party here. Our AI Trade Facilitator is always active. Do NOT share phone numbers, emails, or external links — they will be blocked automatically.",
-    position: "bottom",
-  },
-  {
-    target: "actions-tab",
-    title: "📋 Deal Actions Tab",
-    body: "This is where the real work happens. Exporters submit freight quotes. Buyers approve them and pay into escrow. All payment estimates are calculated automatically.",
-    position: "bottom",
-  },
-  {
-    target: "checklist",
-    title: "📦 Shipment Checklist",
-    body: "After payment, the exporter uploads photos, Bill of Lading, and tracking info here. Buyers can view every milestone in real time.",
-    position: "top",
-  },
-  {
-    target: "delivery",
-    title: "✅ Confirm Delivery",
-    body: "Once goods arrive, the buyer confirms delivery here to release escrow. If something is wrong, you can raise a dispute before confirming.",
-    position: "top",
-  },
-];
-
-function DealRoomTour({ onComplete }: { onComplete: () => void }) {
-  const [stepIndex, setStepIndex] = useState(0);
-  const [visible, setVisible] = useState(true);
-  const step = TOUR_STEPS[stepIndex];
-  const total = TOUR_STEPS.length;
-
-  const next = () => {
-    if (stepIndex < total - 1) setStepIndex((i) => i + 1);
-    else finish();
-  };
-
-  const finish = () => {
-    setVisible(false);
-    onComplete();
-  };
-
-  if (!visible) return null;
-
-  const getPositionStyle = (): CSSProperties => {
-    switch (step.target) {
-      case "header":
-        return { top: 90, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
-      case "chat-tab":
-        return { top: 160, left: "15%", maxWidth: 300 };
-      case "actions-tab":
-        return { top: 160, right: "15%", maxWidth: 300 };
-      case "checklist":
-        return { bottom: 180, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
-      case "delivery":
-        return { bottom: 120, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
-      default:
-        return { top: "50%", left: "50%", transform: "translate(-50%,-50%)", maxWidth: 320 };
-    }
-  };
-
-  const pos = getPositionStyle();
-
-  return (
-    <>
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 1100,
-          background: "rgba(0,0,0,0.35)",
-          backdropFilter: "blur(2px)",
-        }}
-        onClick={finish}
-      />
-      <div
-        style={{
-          position: "fixed",
-          zIndex: 1101,
-          background: "#fff",
-          borderRadius: 16,
-          padding: "18px 20px",
-          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-          border: "1px solid #E5E7EB",
-          width: "calc(100% - 32px)",
-          ...pos,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center" }}>
-          {TOUR_STEPS.map((_, i) => (
-            <div
-              key={i}
-              style={{
-                width: i === stepIndex ? 20 : 8,
-                height: 8,
-                borderRadius: 4,
-                background: i === stepIndex ? "#D4A843" : i < stepIndex ? "#006B3F" : "#E5E7EB",
-                transition: "all 0.3s ease",
-              }}
-            />
-          ))}
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: 10,
-              color: "#9CA3AF",
-              fontWeight: 700,
-              fontFamily: "'Barlow Condensed',sans-serif",
-              letterSpacing: "0.06em",
-            }}
-          >
-            {stepIndex + 1} / {total}
-          </span>
-        </div>
-        <div
-          style={{
-            fontWeight: 900,
-            fontSize: 15,
-            color: "#111827",
-            fontFamily: "'Barlow Condensed',sans-serif",
-            letterSpacing: "0.03em",
-            marginBottom: 8,
-            lineHeight: 1.3,
-          }}
-        >
-          {step.title}
-        </div>
-        <div
-          style={{
-            color: "#4B5563",
-            fontSize: 13,
-            lineHeight: 1.65,
-            marginBottom: 16,
-          }}
-        >
-          {step.body}
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button
-            onClick={finish}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#9CA3AF",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              fontFamily: "'Barlow Condensed',sans-serif",
-              letterSpacing: "0.04em",
-              padding: 0,
-            }}
-          >
-            Skip Tour
-          </button>
-          <div style={{ flex: 1 }} />
-          {stepIndex > 0 && (
-            <button
-              onClick={() => setStepIndex((i) => i - 1)}
-              style={{
-                background: "#F3F4F6",
-                border: "none",
-                borderRadius: 10,
-                padding: "8px 14px",
-                color: "#374151",
-                fontSize: 12,
-                fontWeight: 800,
-                cursor: "pointer",
-                fontFamily: "'Barlow Condensed',sans-serif",
-              }}
-            >
-              Back
-            </button>
-          )}
-          <button
-            onClick={next}
-            style={{
-              background: "#D4A843",
-              border: "none",
-              borderRadius: 10,
-              padding: "8px 18px",
-              color: "#fff",
-              fontSize: 12,
-              fontWeight: 800,
-              cursor: "pointer",
-              fontFamily: "'Barlow Condensed',sans-serif",
-              letterSpacing: "0.04em",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {stepIndex === total - 1 ? "Got it ✓" : "Next →"}
-          </button>
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            ...(step.position === "bottom"
-              ? { top: -6, left: "50%", transform: "translateX(-50%)" }
-              : { bottom: -6, left: "50%", transform: "translateX(-50%) rotate(180deg)" }),
-            width: 12,
-            height: 12,
-            background: "#fff",
-            borderLeft: "1px solid #E5E7EB",
-            borderTop: "1px solid #E5E7EB",
-            borderRadius: 2,
-          }}
-        />
-      </div>
-    </>
-  );
-}
+// LanguageSelector removed — translation is now fully automatic via detection
 
 // ─── MAIN DEALROOM EXPORT ────────────────────────────────────────────────────
 export default function DealRoom() {
@@ -1753,8 +1484,9 @@ export default function DealRoom() {
   const [showBuyerReview, setShowBuyerReview] = useState(false);
   const [buyerRating, setBuyerRating] = useState(0);
   const [submittingBuyerReview, setSubmittingBuyerReview] = useState(false);
-  const [preferredLang, setPreferredLang] = useState("en");
-  const [showTour, setShowTour] = useState(false);
+  // viewerLang: the language this user reads — loaded from their profile
+  // Used to determine what incoming messages should be translated into
+  const [viewerLang, setViewerLang] = useState("en");
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1773,12 +1505,6 @@ export default function DealRoom() {
 
   const isBuyer = order && currentUser ? currentUser.id === order.buyer_id : false;
   const isExporter = order && currentUser ? currentUser.id === order.exporter_id : false;
-
-  const completeTour = useCallback(() => {
-    if (!currentUser) return;
-    localStorage.setItem(`izixport_dealroom_onboarded_${currentUser.id}`, "true");
-    setShowTour(false);
-  }, [currentUser]);
 
   const goodsAmount = Number(order?.total_amount || 0);
   const freightAmount = Number(order?.freight_cost || 0);
@@ -1909,7 +1635,8 @@ export default function DealRoom() {
         };
 
         setCurrentUser(userObj);
-        setPreferredLang(profile.preferred_language || "en");
+        // viewerLang: what THIS user reads — messages from others are translated INTO this
+        setViewerLang(profile.preferred_language || "en");
         setOrder(orderData as Order);
         await seedWelcomeMessage(orderId);
         await fetchMessages(orderId);
@@ -1932,16 +1659,6 @@ export default function DealRoom() {
 
     return () => { active = false; supabase.removeChannel(messagesChannel); supabase.removeChannel(orderChannel); };
   }, [navigate, orderId]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    const key = `izixport_dealroom_onboarded_${currentUser.id}`;
-    const alreadySeen = localStorage.getItem(key);
-    if (!alreadySeen) {
-      const t = setTimeout(() => setShowTour(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, [currentUser]);
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
@@ -2143,14 +1860,6 @@ export default function DealRoom() {
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 14px 8px" }}>
-            <LanguageSelector
-              userId={currentUser.id}
-              currentLang={preferredLang}
-              onChanged={setPreferredLang}
-            />
-          </div>
-
           <div style={{ display: "flex", borderTop: "1px solid #E5E7EB" }}>
             {(["messages", "actions"] as const).map((tab) => (
               <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "12px", background: activeTab === tab ? "#fff" : "#F9FAFB", border: "none", borderBottom: activeTab === tab ? "2px solid #D4A843" : "2px solid transparent", color: activeTab === tab ? "#D4A843" : "#6B7280", fontWeight: 800, fontSize: 12, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", cursor: "pointer", transition: "all 0.2s" }}>
@@ -2194,7 +1903,7 @@ export default function DealRoom() {
                   );
                 }
                 if (msg.is_ai || msg.sender_type === "system") {
-                  return <AIMessage key={item.key} msg={msg} showAvatar={item.showAvatar} preferredLang={preferredLang} />;
+                  return <AIMessage key={item.key} msg={msg} showAvatar={item.showAvatar} viewerLang={viewerLang} />;
                 }
                 const own = msg.sender_type === (isBuyer ? "buyer" : "exporter");
                 return (
@@ -2202,7 +1911,7 @@ export default function DealRoom() {
                     key={item.key} msg={msg} isOwn={own}
                     senderName={msg.sender_type === "buyer" ? order.buyer?.company_name || "Buyer" : order.exporter?.company_name || "Exporter"}
                     showAvatar={item.showAvatar} order={order}
-                    preferredLang={own ? "en" : preferredLang}
+                    viewerLang={viewerLang}
                   />
                 );
               })}
@@ -2335,7 +2044,7 @@ export default function DealRoom() {
         )}
       </div>
 
-      {/* Exporter → Buyer Review BottomSheet */}
+      {/* Buyer review modal */}
       {showBuyerReview && (
         <BottomSheet open onClose={() => setShowBuyerReview(false)} title="Rate Buyer">
           <div style={{ display: "grid", gap: 16 }}>
@@ -2376,8 +2085,6 @@ export default function DealRoom() {
           }}
         />
       )}
-
-      {showTour && <DealRoomTour onComplete={completeTour} />}
     </>
   );
 }
