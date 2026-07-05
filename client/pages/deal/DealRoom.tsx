@@ -1058,7 +1058,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         .eq("id", step.id);
       if (updateErr) throw updateErr;
 
-      // ── NEW: announce upload in chat so buyer sees it immediately ──
       const isImage = file.type.startsWith("image/");
       const label =
         step.step_key === "pre_shipment_photos"
@@ -1071,7 +1070,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         is_ai: true,
         content: `${icon} ${label} uploaded by exporter.\n\n${url}`,
       });
-      // ───────────────────────────────────────────────────────────────
 
       toast.success("Document uploaded.");
     } catch (err: any) {
@@ -1513,6 +1511,228 @@ function LanguageSelector({ userId, currentLang, onChanged }: {
   );
 }
 
+// ─── FIRST-TIMER ONBOARDING TOUR ───────────────────────────────────────────
+const TOUR_STEPS = [
+  {
+    target: "header",
+    title: "Welcome to Your Trade Room",
+    body: "This is your private deal space. Everything — chat, documents, payment, and tracking — happens right here. Keep all communication inside this room.",
+    position: "bottom",
+  },
+  {
+    target: "chat-tab",
+    title: "💬 Chat Messages Tab",
+    body: "Talk to the other party here. Our AI Trade Facilitator is always active. Do NOT share phone numbers, emails, or external links — they will be blocked automatically.",
+    position: "bottom",
+  },
+  {
+    target: "actions-tab",
+    title: "📋 Deal Actions Tab",
+    body: "This is where the real work happens. Exporters submit freight quotes. Buyers approve them and pay into escrow. All payment estimates are calculated automatically.",
+    position: "bottom",
+  },
+  {
+    target: "checklist",
+    title: "📦 Shipment Checklist",
+    body: "After payment, the exporter uploads photos, Bill of Lading, and tracking info here. Buyers can view every milestone in real time.",
+    position: "top",
+  },
+  {
+    target: "delivery",
+    title: "✅ Confirm Delivery",
+    body: "Once goods arrive, the buyer confirms delivery here to release escrow. If something is wrong, you can raise a dispute before confirming.",
+    position: "top",
+  },
+];
+
+function DealRoomTour({ onComplete }: { onComplete: () => void }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+  const step = TOUR_STEPS[stepIndex];
+  const total = TOUR_STEPS.length;
+
+  const next = () => {
+    if (stepIndex < total - 1) setStepIndex((i) => i + 1);
+    else finish();
+  };
+
+  const finish = () => {
+    setVisible(false);
+    onComplete();
+  };
+
+  if (!visible) return null;
+
+  const getPositionStyle = (): CSSProperties => {
+    switch (step.target) {
+      case "header":
+        return { top: 90, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
+      case "chat-tab":
+        return { top: 160, left: "15%", maxWidth: 300 };
+      case "actions-tab":
+        return { top: 160, right: "15%", maxWidth: 300 };
+      case "checklist":
+        return { bottom: 180, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
+      case "delivery":
+        return { bottom: 120, left: "50%", transform: "translateX(-50%)", maxWidth: 340 };
+      default:
+        return { top: "50%", left: "50%", transform: "translate(-50%,-50%)", maxWidth: 320 };
+    }
+  };
+
+  const pos = getPositionStyle();
+
+  return (
+    <>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1100,
+          background: "rgba(0,0,0,0.35)",
+          backdropFilter: "blur(2px)",
+        }}
+        onClick={finish}
+      />
+      <div
+        style={{
+          position: "fixed",
+          zIndex: 1101,
+          background: "#fff",
+          borderRadius: 16,
+          padding: "18px 20px",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          border: "1px solid #E5E7EB",
+          width: "calc(100% - 32px)",
+          ...pos,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center" }}>
+          {TOUR_STEPS.map((_, i) => (
+            <div
+              key={i}
+              style={{
+                width: i === stepIndex ? 20 : 8,
+                height: 8,
+                borderRadius: 4,
+                background: i === stepIndex ? "#D4A843" : i < stepIndex ? "#006B3F" : "#E5E7EB",
+                transition: "all 0.3s ease",
+              }}
+            />
+          ))}
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 10,
+              color: "#9CA3AF",
+              fontWeight: 700,
+              fontFamily: "'Barlow Condensed',sans-serif",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {stepIndex + 1} / {total}
+          </span>
+        </div>
+        <div
+          style={{
+            fontWeight: 900,
+            fontSize: 15,
+            color: "#111827",
+            fontFamily: "'Barlow Condensed',sans-serif",
+            letterSpacing: "0.03em",
+            marginBottom: 8,
+            lineHeight: 1.3,
+          }}
+        >
+          {step.title}
+        </div>
+        <div
+          style={{
+            color: "#4B5563",
+            fontSize: 13,
+            lineHeight: 1.65,
+            marginBottom: 16,
+          }}
+        >
+          {step.body}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={finish}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#9CA3AF",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "'Barlow Condensed',sans-serif",
+              letterSpacing: "0.04em",
+              padding: 0,
+            }}
+          >
+            Skip Tour
+          </button>
+          <div style={{ flex: 1 }} />
+          {stepIndex > 0 && (
+            <button
+              onClick={() => setStepIndex((i) => i - 1)}
+              style={{
+                background: "#F3F4F6",
+                border: "none",
+                borderRadius: 10,
+                padding: "8px 14px",
+                color: "#374151",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontFamily: "'Barlow Condensed',sans-serif",
+              }}
+            >
+              Back
+            </button>
+          )}
+          <button
+            onClick={next}
+            style={{
+              background: "#D4A843",
+              border: "none",
+              borderRadius: 10,
+              padding: "8px 18px",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: "pointer",
+              fontFamily: "'Barlow Condensed',sans-serif",
+              letterSpacing: "0.04em",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {stepIndex === total - 1 ? "Got it ✓" : "Next →"}
+          </button>
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            ...(step.position === "bottom"
+              ? { top: -6, left: "50%", transform: "translateX(-50%)" }
+              : { bottom: -6, left: "50%", transform: "translateX(-50%) rotate(180deg)" }),
+            width: 12,
+            height: 12,
+            background: "#fff",
+            borderLeft: "1px solid #E5E7EB",
+            borderTop: "1px solid #E5E7EB",
+            borderRadius: 2,
+          }}
+        />
+      </div>
+    </>
+  );
+}
+
 // ─── MAIN DEALROOM EXPORT ────────────────────────────────────────────────────
 export default function DealRoom() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -1534,6 +1754,7 @@ export default function DealRoom() {
   const [buyerRating, setBuyerRating] = useState(0);
   const [submittingBuyerReview, setSubmittingBuyerReview] = useState(false);
   const [preferredLang, setPreferredLang] = useState("en");
+  const [showTour, setShowTour] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1552,6 +1773,12 @@ export default function DealRoom() {
 
   const isBuyer = order && currentUser ? currentUser.id === order.buyer_id : false;
   const isExporter = order && currentUser ? currentUser.id === order.exporter_id : false;
+
+  const completeTour = useCallback(() => {
+    if (!currentUser) return;
+    localStorage.setItem(`izixport_dealroom_onboarded_${currentUser.id}`, "true");
+    setShowTour(false);
+  }, [currentUser]);
 
   const goodsAmount = Number(order?.total_amount || 0);
   const freightAmount = Number(order?.freight_cost || 0);
@@ -1705,6 +1932,16 @@ export default function DealRoom() {
 
     return () => { active = false; supabase.removeChannel(messagesChannel); supabase.removeChannel(orderChannel); };
   }, [navigate, orderId]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const key = `izixport_dealroom_onboarded_${currentUser.id}`;
+    const alreadySeen = localStorage.getItem(key);
+    if (!alreadySeen) {
+      const t = setTimeout(() => setShowTour(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [currentUser]);
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
@@ -2139,6 +2376,8 @@ export default function DealRoom() {
           }}
         />
       )}
+
+      {showTour && <DealRoomTour onComplete={completeTour} />}
     </>
   );
 }
