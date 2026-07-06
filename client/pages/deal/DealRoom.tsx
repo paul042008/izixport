@@ -162,66 +162,47 @@ const LANG_NAMES: Record<string, string> = {
   nl: "Dutch", vi: "Vietnamese", th: "Thai", en: "English",
 };
 
-// ─── LIBRE TRANSLATE — AUTO DETECT + TRANSLATE ───────────────────────────────
-// Detects the language of a message, then translates it to the viewer's language
-// Only called on messages from the OTHER party, never your own
+// ─── TRANSLATION — via Supabase Edge Function ────────────────────────────────
+// Calls our own backend function which proxies to LibreTranslate mirrors.
+// Avoids CORS, domain death, and rate-limit issues.
 
-const LIBRE_BASE = "https://translate.argosopentech.com";
-
-const detectLanguage = async (text: string): Promise<string> => {
-  // Skip detection for very short texts or system messages
-  if (!text || text.length < 4) return "en";
-  try {
-    const res = await fetch(`${LIBRE_BASE}/detect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: text }),
-    });
-    if (!res.ok) return "en";
-    const data = await res.json();
-    // Returns array of {language, confidence} — pick highest confidence
-    if (Array.isArray(data) && data.length > 0) {
-      const best = data.sort((a: any, b: any) => b.confidence - a.confidence)[0];
-      return best.language || "en";
-    }
-    return "en";
-  } catch {
-    return "en";
-  }
-};
-
-const translateText = async (
-  text: string,
-  sourceLang: string,
-  targetLang: string
-): Promise<string> => {
-  if (!text || sourceLang === targetLang) return text;
-  try {
-    const res = await fetch(`${LIBRE_BASE}/translate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: text, source: sourceLang, target: targetLang }),
-    });
-    if (!res.ok) return text;
-    const data = await res.json();
-    return data.translatedText || text;
-  } catch {
-    return text;
-  }
-};
-
-// Auto-detect and translate a message from another user
-// Returns { translated, detectedLang } or null if no translation needed
 const autoTranslate = async (
   text: string,
-  viewerLang: string // the language the viewer reads (usually "en" for Nigerian exporters)
+  viewerLang: string
 ): Promise<{ translated: string; detectedLang: string } | null> => {
-  const detected = await detectLanguage(text);
-  // If already in viewer's language, no translation needed
-  if (detected === viewerLang || detected === "en" && viewerLang === "en") return null;
-  const translated = await translateText(text, detected, viewerLang);
-  if (!translated || translated === text) return null;
-  return { translated, detectedLang: detected };
+  if (!text || text.length < 3 || viewerLang === "auto") return null;
+
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ text, targetLang: viewerLang }),
+      }
+    );
+
+    if (!res.ok) {
+      console.error("Translate function error:", res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    if (data.translated && data.translated !== text) {
+      if (data.detectedLang === viewerLang) return null;
+      return { translated: data.translated, detectedLang: data.detectedLang };
+    }
+    return null;
+  } catch (err) {
+    console.error("Translation failed:", err);
+    return null;
+  }
 };
 
 const BUYER_ESCROW_FEE_RATE = 0.045;
@@ -440,10 +421,10 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
   useEffect(() => {
     // AI messages are always English — only translate if viewer isn't English
     if (viewerLang && viewerLang !== "en") {
-      translateText(msg.content, "en", viewerLang).then((t) => {
-        if (t && t !== msg.content) {
-          setTranslated(t);
-          setDetectedLang("en");
+      autoTranslate(msg.content, viewerLang).then((result) => {
+        if (result) {
+          setTranslated(result.translated);
+          setDetectedLang(result.detectedLang);
         }
       });
     }
