@@ -1,34 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Shield,
-  Lock,
-  Truck,
-  CheckCircle,
-  Globe,
-  ArrowRight,
-  Menu,
-  BarChart3,
-  Users,
-  TrendingUp,
-  Building2,
-  X,
-  Mail,
-  Heart,
-  MapPin,
-  Linkedin,
-  Github,
-  Check,
-  CreditCard,
-  Zap,
-  Star,
-  Award,
-  Twitter,
-  Instagram,
+  Shield, Lock, Truck, CheckCircle, Globe, ArrowRight, Menu,
+  BarChart3, Users, TrendingUp, Building2, X, Mail, Heart,
+  MapPin, Linkedin, Github, Check, CreditCard, Zap, Star,
+  Award, Twitter, Instagram, Loader2, Package,
 } from "lucide-react";
 
-import LiveStats from "../components/LiveStats";
 import Testimonials from "../components/Testimonials";
+import { supabase } from "@/lib/supabase/client";
 
 /* ============================================================
    BRAND TOKENS
@@ -61,12 +41,11 @@ const C = {
 };
 
 /* ============================================================
-   CUSTOM HOOKS — unchanged
+   CUSTOM HOOKS
    ============================================================ */
 function useCountUp(target: number, duration = 2000, start = false) {
   const [count, setCount] = useState(0);
   const frameRef = useRef<number | null>(null);
-
   useEffect(() => {
     if (!start) return;
     let startTime: number | null = null;
@@ -82,14 +61,12 @@ function useCountUp(target: number, duration = 2000, start = false) {
     frameRef.current = requestAnimationFrame(animate);
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
   }, [target, duration, start]);
-
   return count;
 }
 
 function useInView(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
-
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -100,7 +77,6 @@ function useInView(threshold = 0.15) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [threshold]);
-
   return { ref, inView };
 }
 
@@ -123,7 +99,7 @@ function AnimatedSection({ children, className = "", delay = 0 }: {
 }
 
 /* ============================================================
-   MODAL COMPONENT — unchanged logic
+   MODAL COMPONENT
    ============================================================ */
 function Modal({ open, onClose, title, children }: {
   open: boolean; onClose: () => void; title: string; children: React.ReactNode;
@@ -132,25 +108,18 @@ function Modal({ open, onClose, title, children }: {
     document.body.style.overflow = open ? "hidden" : "auto";
     return () => { document.body.style.overflow = "auto"; };
   }, [open]);
-
   if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(8px)", animation: "lp-fadeIn 0.2s ease-out" }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: C.white, borderRadius: 20, maxWidth: 640, width: "100%",
-          maxHeight: "88vh", overflowY: "auto",
-          border: `1px solid ${C.border}`,
-          boxShadow: "0 32px 80px rgba(0,0,0,0.18)",
-          animation: "lp-scaleUp 0.28s cubic-bezier(0.16,1,0.3,1)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+      onClick={onClose}>
+      <div style={{
+        background: C.white, borderRadius: 20, maxWidth: 640, width: "100%",
+        maxHeight: "88vh", overflowY: "auto",
+        border: `1px solid ${C.border}`,
+        boxShadow: "0 32px 80px rgba(0,0,0,0.18)",
+        animation: "lp-scaleUp 0.28s cubic-bezier(0.16,1,0.3,1)",
+      }} onClick={(e) => e.stopPropagation()}>
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
           padding: "24px 28px 20px",
@@ -200,19 +169,16 @@ function Navbar() {
   const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 50);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
   const navLinks = [
     { label: "Marketplace", href: "#marketplace" },
     { label: "How it Works", href: "#how-it-works" },
     { label: "Pricing", href: "#pricing" },
   ];
-
   return (
     <>
       <nav style={{
@@ -228,22 +194,18 @@ function Navbar() {
           maxWidth: 1200, margin: "0 auto", padding: "0 28px",
           height: 68, display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
-          {/* Logo */}
           <a href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
             <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}`, display: "inline-flex" }}>
               <img src="/logo.jpeg" alt="IziXport" style={{ height: 36, width: "auto", display: "block" }} />
             </div>
           </a>
-
-          {/* Desktop nav */}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }} className="lp-desktop-nav">
             {navLinks.map(link => (
               <a key={link.label} href={link.href} style={{
                 padding: "8px 16px", borderRadius: 8,
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
                 fontSize: 13, fontWeight: 600, color: C.gray600,
-                textDecoration: "none",
-                transition: "all 0.15s",
+                textDecoration: "none", transition: "all 0.15s",
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.background = C.greenLight; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.gray600; (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
@@ -251,8 +213,6 @@ function Navbar() {
               </a>
             ))}
           </div>
-
-          {/* Desktop buttons */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }} className="lp-desktop-nav">
             <button onClick={() => navigate("/login")} style={{
               padding: "9px 20px", borderRadius: 8,
@@ -277,8 +237,6 @@ function Navbar() {
               Get Started <ArrowRight size={13} />
             </button>
           </div>
-
-          {/* Mobile toggle */}
           <button className="lp-mobile-only" onClick={() => setMobileOpen(!mobileOpen)} style={{
             background: C.greenLight, border: "none", borderRadius: 8,
             width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center",
@@ -288,8 +246,6 @@ function Navbar() {
           </button>
         </div>
       </nav>
-
-      {/* Mobile drawer */}
       {mobileOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 40, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}
           onClick={() => setMobileOpen(false)} />
@@ -343,54 +299,46 @@ function Navbar() {
 }
 
 /* ============================================================
-   HERO — Dark, editorial, commanding — with LiveStats integrated
+   HERO
    ============================================================ */
 function HeroSection() {
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState(false);
-
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 80);
     return () => clearTimeout(t);
   }, []);
-
+  const trustPillars = [
+    { icon: Shield, title: "Verified Exporters", desc: "CAC + NEPC checked" },
+    { icon: Lock, title: "Escrow Secured", desc: "Payment on delivery" },
+    { icon: Truck, title: "Tracked Shipments", desc: "Real-time logistics" },
+    { icon: Award, title: "Bank-Grade Security", desc: "256-bit encrypted" },
+  ];
   return (
     <section style={{
       position: "relative", minHeight: "100vh",
       display: "flex", flexDirection: "column",
       background: C.greenDeep, overflow: "hidden",
     }}>
-      {/* Structural grid overlay */}
       <div style={{
         position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
-        backgroundImage: `
-          linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)
-        `,
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)`,
         backgroundSize: "80px 80px",
       }} />
-
-      {/* Gold radial — top right */}
       <div style={{
         position: "absolute", top: "-15%", right: "-10%", zIndex: 0, pointerEvents: "none",
         width: "55vw", height: "55vw", borderRadius: "50%",
         background: `radial-gradient(circle, rgba(212,168,67,0.10) 0%, transparent 65%)`,
       }} />
-
-      {/* Deep green radial — bottom left */}
       <div style={{
         position: "absolute", bottom: "0", left: "0", zIndex: 0, pointerEvents: "none",
         width: "40vw", height: "40vw", borderRadius: "50%",
         background: `radial-gradient(circle, rgba(26,92,65,0.6) 0%, transparent 70%)`,
       }} />
-
-      {/* Subtle video */}
       <div style={{ position: "absolute", inset: 0, zIndex: 0, opacity: 0.06 }}>
         <video autoPlay loop muted playsInline preload="none" poster="/hero-poster.jpg"
           style={{ width: "100%", height: "100%", objectFit: "cover" }} src="/hero-bg.mp4" />
       </div>
-
-      {/* Main content */}
       <div style={{
         position: "relative", zIndex: 10,
         flex: 1, display: "flex", flexDirection: "column", justifyContent: "center",
@@ -400,7 +348,6 @@ function HeroSection() {
         transform: loaded ? "translateY(0)" : "translateY(20px)",
         transition: "opacity 0.9s ease-out, transform 0.9s cubic-bezier(0.16,1,0.3,1)",
       }}>
-        {/* Eyebrow */}
         <div style={{
           display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 28,
           padding: "8px 16px", borderRadius: 6,
@@ -408,15 +355,12 @@ function HeroSection() {
           background: "rgba(212,168,67,0.06)",
           alignSelf: "flex-start",
         }}>
-           
           <span style={{
             fontFamily: "'Plus Jakarta Sans', sans-serif",
             fontSize: 10, fontWeight: 800, letterSpacing: "0.22em",
             textTransform: "uppercase", color: C.gold,
           }}>Africa's #1 Verified Trade Marketplace</span>
         </div>
-
-        {/* Headline */}
         <h1 style={{
           fontFamily: "'Barlow Condensed', sans-serif",
           fontSize: "clamp(52px, 9.5vw, 110px)",
@@ -430,8 +374,6 @@ function HeroSection() {
           <span style={{ color: C.gold }}>Trades</span> With<br />
           The World.
         </h1>
-
-        {/* Subheadline */}
         <p style={{
           fontFamily: "'Plus Jakarta Sans', sans-serif",
           fontSize: "clamp(14px, 1.6vw, 18px)",
@@ -445,8 +387,6 @@ function HeroSection() {
           </span>{" "}
           — no middlemen, full escrow, real-time tracking.
         </p>
-
-        {/* CTA row */}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 64 }}>
           <button onClick={() => navigate("/signup?type=exporter")} style={{
             padding: "15px 32px", borderRadius: 9,
@@ -476,8 +416,6 @@ function HeroSection() {
             Find Suppliers <ArrowRight size={15} />
           </button>
         </div>
-
-        {/* Trust badges row */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 48 }}>
           {[
             { icon: CheckCircle, label: "100% Verified Suppliers" },
@@ -498,26 +436,47 @@ function HeroSection() {
           ))}
         </div>
       </div>
-      {/* LiveStats white card — sits BELOW the hero, no overlap */}
-      <div style={{
-        position: "relative",
-        zIndex: 20,
-        marginTop: 0,            /* no longer pulled up */
-        marginBottom: 0,         /* no longer overlapping next section */
-      }}>
-        <div style={{
-          maxWidth: 1000,
-          margin: "0 auto",
-          padding: "0 28px",
-        }}>
+      <div style={{ position: "relative", zIndex: 20 }}>
+        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "0 28px" }}>
           <div style={{
             background: C.white,
             borderRadius: 18,
             boxShadow: "0 24px 64px rgba(0,0,0,0.10)",
             border: `1px solid ${C.border}`,
             overflow: "hidden",
+            padding: "36px 40px",
           }}>
-            <LiveStats transparent />
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 28,
+            }} className="lp-trust-grid">
+              {trustPillars.map(({ icon: Icon, title, desc }) => (
+                <div key={title} style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{
+                    width: 46, height: 46, borderRadius: 11,
+                    background: C.greenDeep,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0,
+                    boxShadow: "0 6px 18px rgba(12,56,37,0.22)",
+                  }}>
+                    <Icon size={20} color={C.gold} />
+                  </div>
+                  <div>
+                    <div style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 17, fontWeight: 800, color: C.gray900,
+                      letterSpacing: "0.01em", lineHeight: 1.2,
+                    }}>{title}</div>
+                    <div style={{
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 12, color: C.gray500, marginTop: 3,
+                      fontWeight: 500,
+                    }}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -545,10 +504,8 @@ const buyerSteps = [
 function HowItWorks() {
   const [activeTab, setActiveTab] = useState<"exporter" | "buyer">("exporter");
   const steps = activeTab === "exporter" ? exporterSteps : buyerSteps;
-
   return (
     <section id="how-it-works" style={{ padding: "100px 0", background: C.white, position: "relative", overflow: "hidden" }}>
-      {/* Watermark */}
       <div style={{
         position: "absolute", right: 0, top: "5%",
         fontFamily: "'Barlow Condensed', sans-serif",
@@ -557,21 +514,18 @@ function HowItWorks() {
         pointerEvents: "none", userSelect: "none",
         letterSpacing: "-0.04em",
       }}>HOW</div>
-
-<div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative" }}>
-  <AnimatedSection className="lp-text-center">
-    <div style={{ marginBottom: 20 }}>
-      <Label>Process</Label>
-      <h2 style={{
-        fontFamily: "'Barlow Condensed', sans-serif",
-        fontSize: "clamp(44px, 7vw, 88px)", fontWeight: 900,
-        color: C.gray900, letterSpacing: "-0.03em",
-        margin: "0 0 0",
-      }}>How IziXport Works</h2>
-    </div>
-  </AnimatedSection>
-
-        {/* Tab switcher */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative" }}>
+        <AnimatedSection className="lp-text-center">
+          <div style={{ marginBottom: 20 }}>
+            <Label>Process</Label>
+            <h2 style={{
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: "clamp(44px, 7vw, 88px)", fontWeight: 900,
+              color: C.gray900, letterSpacing: "-0.03em",
+              margin: "0 0 0",
+            }}>How IziXport Works</h2>
+          </div>
+        </AnimatedSection>
         <AnimatedSection delay={100}>
           <div style={{ display: "flex", justifyContent: "center", marginTop: 28, marginBottom: 60 }}>
             <div style={{
@@ -595,8 +549,6 @@ function HowItWorks() {
             </div>
           </div>
         </AnimatedSection>
-
-        {/* Step cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
           {steps.map((step, idx) => (
             <AnimatedSection key={`${activeTab}-${idx}`} delay={idx * 90}>
@@ -618,7 +570,6 @@ function HowItWorks() {
                 (e.currentTarget as HTMLElement).style.borderColor = C.border;
                 (e.currentTarget as HTMLElement).style.boxShadow = "none";
               }}>
-                {/* Step number — faint background */}
                 <div style={{
                   position: "absolute", top: 18, right: 18,
                   fontFamily: "'Barlow Condensed', sans-serif",
@@ -626,8 +577,6 @@ function HowItWorks() {
                   color: "rgba(0,107,63,0.05)", letterSpacing: "-0.03em",
                   pointerEvents: "none", userSelect: "none",
                 }}>{step.number}</div>
-
-                {/* Icon */}
                 <div style={{
                   width: 48, height: 48, borderRadius: 11,
                   background: C.greenDeep,
@@ -637,19 +586,15 @@ function HowItWorks() {
                 }}>
                   <step.icon size={20} color={C.white} />
                 </div>
-
                 <h3 style={{
                   fontFamily: "'Barlow Condensed', sans-serif",
                   fontSize: 20, fontWeight: 800, color: C.gray900,
                   margin: "0 0 10px", letterSpacing: "0.01em",
                 }}>{step.title}</h3>
-
                 <p style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 13, color: C.gray500, lineHeight: 1.7, margin: "0 0 20px",
                 }}>{step.desc}</p>
-
-                {/* Step tag */}
                 <div style={{
                   display: "inline-flex", alignItems: "center",
                   padding: "4px 10px", borderRadius: 5,
@@ -662,8 +607,6 @@ function HowItWorks() {
                     letterSpacing: "0.12em", textTransform: "uppercase",
                   }}>Step {step.number}</span>
                 </div>
-
-                {/* Connector dot */}
                 {idx < 3 && (
                   <div className="lp-connector" style={{
                     position: "absolute", right: -22, top: "42%",
@@ -685,39 +628,97 @@ function HowItWorks() {
 }
 
 /* ============================================================
-   FEATURED PRODUCTS
+   FEATURED PRODUCTS — Fetched from Supabase, max 4
    ============================================================ */
 const COMMODITY_META: Record<string, { accent: string; bg: string }> = {
   "Cashew Nuts":   { accent: "#B87840", bg: "rgba(184,120,64,0.06)" },
   "Cocoa Beans":   { accent: "#8B5E3C", bg: "rgba(139,94,60,0.06)" },
   "Sesame Seeds":  { accent: "#C4A84A", bg: "rgba(196,168,74,0.06)" },
   "Shea Butter":   { accent: "#6AAD5A", bg: "rgba(106,173,90,0.06)" },
+  "Hibiscus":      { accent: "#C06080", bg: "rgba(192,96,128,0.06)" },
+  "Ginger":        { accent: "#D4A843", bg: "rgba(212,168,67,0.06)" },
+  "Palm Oil":      { accent: "#D4721A", bg: "rgba(212,114,26,0.06)" },
+  "Pepper":        { accent: "#D45050", bg: "rgba(212,80,80,0.06)" },
 };
 
 const COMMODITY_EMOJI: Record<string, string> = {
-  "Cashew Nuts": "🥜", "Cocoa Beans": "🍫", "Sesame Seeds": "🌾", "Shea Butter": "🫙",
+  "cashew": "🥜", "cocoa": "🍫", "sesame": "🌾", "shea": "🫙",
+  "hibiscus": "🌺", "ginger": "🫚", "palm": "🛢️", "pepper": "🌶️",
 };
 
-const featuredListings = [
-  { title: "Cashew Nuts",  exporter: "AgroExport Ltd",  price: "$1,200/ton", origin: "Lagos, Nigeria",  minOrder: "5 tons",  rating: 4.9, deals: 48 },
-  { title: "Cocoa Beans",  exporter: "African Harvest", price: "$2,800/ton", origin: "Kano, Nigeria",   minOrder: "10 tons", rating: 4.8, deals: 61 },
-  { title: "Sesame Seeds", exporter: "North Agro",      price: "$900/ton",  origin: "Benue, Nigeria",  minOrder: "15 tons", rating: 5.0, deals: 32 },
-  { title: "Shea Butter",  exporter: "Ogun Naturals",   price: "$1,500/ton", origin: "Ogun, Nigeria",   minOrder: "2 tons",  rating: 4.7, deals: 27 },
-];
+function getCommodityMeta(title: string, category: string) {
+  const text = (title + " " + category).toLowerCase();
+  for (const [key, meta] of Object.entries(COMMODITY_META)) {
+    if (text.includes(key.toLowerCase())) return { ...meta, emoji: COMMODITY_EMOJI[key.toLowerCase()] || "📦" };
+  }
+  for (const [key, meta] of Object.entries(COMMODITY_META)) {
+    if (category?.toLowerCase().includes(key.toLowerCase())) return { ...meta, emoji: COMMODITY_EMOJI[key.toLowerCase()] || "📦" };
+  }
+  return { accent: C.greenBright, bg: C.greenLight, emoji: "📦" };
+}
+
+interface ListingItem {
+  id: string;
+  title: string;
+  price_per_unit: number;
+  currency: string;
+  unit: string;
+  min_order_quantity: number;
+  available_quantity: number;
+  origin_state: string;
+  category: string;
+  exporter_name: string;
+  photos: string[] | null;
+}
 
 function FeaturedProducts() {
   const navigate = useNavigate();
+  const [listings, setListings] = useState<ListingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchListings = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("listings")
+        .select(`
+          id, title, price_per_unit, currency, unit,
+          min_order_quantity, available_quantity, origin_state,
+          category, photos,
+          exporter:users!listings_exporter_id_fkey(company_name, full_name)
+        `)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(4);
+
+      if (!error && data) {
+        setListings(data.map((l: any) => ({
+          id: l.id,
+          title: l.title,
+          price_per_unit: l.price_per_unit || 0,
+          currency: l.currency || "USD",
+          unit: l.unit || "ton",
+          min_order_quantity: l.min_order_quantity || 1,
+          available_quantity: l.available_quantity || 0,
+          origin_state: l.origin_state || "Nigeria",
+          category: l.category || "",
+          exporter_name: l.exporter?.company_name || l.exporter?.full_name || "Verified Exporter",
+          photos: l.photos || null,
+        })));
+      }
+      setLoading(false);
+    };
+    fetchListings();
+  }, []);
 
   return (
     <section id="marketplace" style={{ padding: "100px 0", background: C.bg, position: "relative", overflow: "hidden" }}>
-      {/* Dot pattern */}
       <div style={{
         position: "absolute", inset: 0, pointerEvents: "none",
         backgroundImage: `radial-gradient(circle at 1px 1px, rgba(12,56,37,0.055) 1px, transparent 0)`,
         backgroundSize: "36px 36px",
         opacity: 0.5,
       }} />
-
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative" }}>
         <AnimatedSection>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20, marginBottom: 52 }}>
@@ -738,122 +739,132 @@ function FeaturedProducts() {
           </div>
         </AnimatedSection>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
-          {featuredListings.map((item, i) => {
-            const meta = COMMODITY_META[item.title] || { accent: C.greenBright, bg: C.greenLight };
-            return (
-              <AnimatedSection key={i} delay={i * 90}>
-                <div style={{
-                  background: C.white, borderRadius: 14,
-                  border: `1px solid ${C.border}`,
-                  overflow: "hidden", height: "100%",
-                  display: "flex", flexDirection: "column",
-                  transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
-                  cursor: "pointer",
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLElement).style.transform = "translateY(-6px)";
-                  (e.currentTarget as HTMLElement).style.boxShadow = `0 24px 60px rgba(0,0,0,0.1)`;
-                  (e.currentTarget as HTMLElement).style.borderColor = meta.accent;
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
-                  (e.currentTarget as HTMLElement).style.boxShadow = "none";
-                  (e.currentTarget as HTMLElement).style.borderColor = C.border;
-                }}>
-                  {/* Color accent bar */}
-                  <div style={{ height: 3, background: meta.accent }} />
-
-                  {/* Image area */}
-                  <div style={{
-                    height: 150, background: meta.bg,
-                    display: "flex", flexDirection: "column",
-                    alignItems: "center", justifyContent: "center", gap: 10,
-                    position: "relative",
-                  }}>
-                    <span style={{ fontSize: 52, lineHeight: 1 }}>{COMMODITY_EMOJI[item.title]}</span>
-                    <span style={{
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 10, fontWeight: 700, color: C.gray500,
-                      textTransform: "uppercase", letterSpacing: "0.12em",
-                      display: "flex", alignItems: "center", gap: 4,
-                    }}>
-                      <MapPin size={9} /> {item.origin}
-                    </span>
-                    <div style={{
-                      position: "absolute", top: 11, right: 11,
-                      background: C.greenDeep, borderRadius: 5,
-                      padding: "3px 9px", display: "flex", alignItems: "center", gap: 4,
-                    }}>
-                      <CheckCircle size={9} color={C.gold} />
-                      <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 9, fontWeight: 800, color: C.white, letterSpacing: "0.08em" }}>VERIFIED</span>
-                    </div>
-                  </div>
-
-                  {/* Body */}
-                  <div style={{ padding: "20px", flex: 1, display: "flex", flexDirection: "column" }}>
-                    <h3 style={{
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      fontSize: 22, fontWeight: 900, color: C.gray900,
-                      margin: "0 0 3px", letterSpacing: "0.01em",
-                    }}>{item.title}</h3>
-                    <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11, color: C.gray400, fontWeight: 600, margin: "0 0 12px" }}>
-                      {item.exporter}
-                    </p>
-
-                    {/* Stars */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
-                      <div style={{ display: "flex", gap: 2 }}>
-                        {[1,2,3,4,5].map(s => (
-                          <Star key={s} size={12}
-                            fill={s <= Math.round(item.rating) ? C.gold : "none"}
-                            color={s <= Math.round(item.rating) ? C.gold : C.gray200}
-                          />
-                        ))}
-                      </div>
-                      <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11, color: C.gray400, fontWeight: 600 }}>
-                        {item.rating} · {item.deals} deals
-                      </span>
-                    </div>
-
-                    {/* Price */}
-                    <div style={{
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      fontSize: 28, fontWeight: 900, color: meta.accent,
-                      lineHeight: 1, marginBottom: 10,
-                    }}>{item.price}</div>
-
-                    <div style={{
-                      display: "flex", justifyContent: "space-between",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11,
-                      color: C.gray400, fontWeight: 600, marginBottom: 18,
-                    }}>
-                      <span>Min: {item.minOrder}</span>
-                      <span style={{ color: "#10B981", fontWeight: 700 }}>● In Stock</span>
-                    </div>
-
-                    <button onClick={() => navigate("/signup?type=buyer")} style={{
-                      marginTop: "auto", width: "100%", padding: "11px",
-                      borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      background: "transparent", color: C.greenBright,
-                      border: `1.5px solid rgba(0,107,63,0.22)`,
-                      transition: "all 0.18s",
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenDeep; (e.currentTarget as HTMLElement).style.color = C.white; (e.currentTarget as HTMLElement).style.borderColor = C.greenDeep; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,107,63,0.22)"; }}>
-                      Enquire Now
-                    </button>
-                  </div>
+        {loading ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
+            {[1,2,3,4].map(i => (
+              <div key={i} style={{ background: C.white, borderRadius: 14, border: `1px solid ${C.border}`, overflow: "hidden", height: 380 }}>
+                <div style={{ height: 150, background: C.gray100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Loader2 size={24} color={C.gray400} className="lp-spin" />
                 </div>
-              </AnimatedSection>
-            );
-          })}
-        </div>
+                <div style={{ padding: 20 }}>
+                  <div style={{ width: "70%", height: 18, background: C.gray100, borderRadius: 4, marginBottom: 12 }} />
+                  <div style={{ width: "50%", height: 14, background: C.gray100, borderRadius: 4, marginBottom: 16 }} />
+                  <div style={{ width: "40%", height: 28, background: C.gray100, borderRadius: 4 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : listings.length === 0 ? (
+          <AnimatedSection>
+            <div style={{ textAlign: "center", padding: 60, background: C.white, borderRadius: 16, border: `1px solid ${C.border}` }}>
+              <Package size={40} color={C.gray400} style={{ margin: "0 auto 16px" }} />
+              <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 16, color: C.gray600, fontWeight: 600 }}>
+                No active listings yet. Be the first to list!
+              </p>
+            </div>
+          </AnimatedSection>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
+            {listings.map((item, i) => {
+              const meta = getCommodityMeta(item.title, item.category);
+              return (
+                <AnimatedSection key={item.id} delay={i * 90}>
+                  <div style={{
+                    background: C.white, borderRadius: 14,
+                    border: `1px solid ${C.border}`,
+                    overflow: "hidden", height: "100%",
+                    display: "flex", flexDirection: "column",
+                    transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLElement).style.transform = "translateY(-6px)";
+                    (e.currentTarget as HTMLElement).style.boxShadow = `0 24px 60px rgba(0,0,0,0.1)`;
+                    (e.currentTarget as HTMLElement).style.borderColor = meta.accent;
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+                    (e.currentTarget as HTMLElement).style.boxShadow = "none";
+                    (e.currentTarget as HTMLElement).style.borderColor = C.border;
+                  }}>
+                    <div style={{ height: 3, background: meta.accent }} />
+                    <div style={{
+                      height: 150, background: meta.bg,
+                      display: "flex", flexDirection: "column",
+                      alignItems: "center", justifyContent: "center", gap: 10,
+                      position: "relative",
+                    }}>
+                      {item.photos && item.photos.length > 0 ? (
+                        <img src={item.photos[0]} alt={item.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        <span style={{ fontSize: 52, lineHeight: 1 }}>{meta.emoji}</span>
+                      )}
+                      <span style={{
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        fontSize: 10, fontWeight: 700, color: C.gray500,
+                        textTransform: "uppercase", letterSpacing: "0.12em",
+                        display: "flex", alignItems: "center", gap: 4,
+                        position: "absolute", bottom: 10, left: 10,
+                        background: "rgba(255,255,255,0.9)", padding: "3px 10px", borderRadius: 5,
+                      }}>
+                        <MapPin size={9} /> {item.origin_state}
+                      </span>
+                      <div style={{
+                        position: "absolute", top: 11, right: 11,
+                        background: C.greenDeep, borderRadius: 5,
+                        padding: "3px 9px", display: "flex", alignItems: "center", gap: 4,
+                      }}>
+                        <CheckCircle size={9} color={C.gold} />
+                        <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 9, fontWeight: 800, color: C.white, letterSpacing: "0.08em" }}>VERIFIED</span>
+                      </div>
+                    </div>
+                    <div style={{ padding: "20px", flex: 1, display: "flex", flexDirection: "column" }}>
+                      <h3 style={{
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontSize: 22, fontWeight: 900, color: C.gray900,
+                        margin: "0 0 3px", letterSpacing: "0.01em",
+                      }}>{item.title}</h3>
+                      <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11, color: C.gray400, fontWeight: 600, margin: "0 0 12px" }}>
+                        {item.exporter_name}
+                      </p>
+                      <div style={{
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontSize: 28, fontWeight: 900, color: meta.accent,
+                        lineHeight: 1, marginBottom: 10,
+                      }}>
+                        {item.currency === "USD" ? "$" : item.currency + " "}{item.price_per_unit.toLocaleString()}/{item.unit}
+                      </div>
+                      <div style={{
+                        display: "flex", justifyContent: "space-between",
+                        fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11,
+                        color: C.gray400, fontWeight: 600, marginBottom: 18,
+                      }}>
+                        <span>Min: {item.min_order_quantity} {item.unit}</span>
+                        <span style={{ color: "#10B981", fontWeight: 700 }}>● In Stock</span>
+                      </div>
+                      <button onClick={() => navigate("/login")} style={{
+                        marginTop: "auto", width: "100%", padding: "11px",
+                        borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        background: "transparent", color: C.greenBright,
+                        border: `1.5px solid rgba(0,107,63,0.22)`,
+                        transition: "all 0.18s",
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenDeep; (e.currentTarget as HTMLElement).style.color = C.white; (e.currentTarget as HTMLElement).style.borderColor = C.greenDeep; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,107,63,0.22)"; }}>
+                        Enquire Now
+                      </button>
+                    </div>
+                  </div>
+                </AnimatedSection>
+              );
+            })}
+          </div>
+        )}
 
         <AnimatedSection delay={350}>
           <div style={{ textAlign: "center", marginTop: 48 }}>
-            <a href="/marketplace" style={{
+            <a href="/login" style={{
               display: "inline-flex", alignItems: "center", gap: 8,
               padding: "13px 28px", borderRadius: 9,
               fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -873,7 +884,7 @@ function FeaturedProducts() {
 }
 
 /* ============================================================
-   TRUST SECTION — dark, institutional
+   TRUST SECTION — FAKE STATS REPLACED WITH TRUST-BUILDING COPY
    ============================================================ */
 function TrustSection() {
   const cards = [
@@ -883,30 +894,24 @@ function TrustSection() {
       stat: "100%", statLabel: "Payment Security", accent: C.gold,
     },
     {
-      icon: Shield, title: "Verified Profiles",
-      desc: "Every trader is document-verified before platform access. Only registered, legitimate businesses with real trade history.",
-      stat: "247+", statLabel: "Verified Traders", accent: C.white,
+      icon: Shield, title: "Document Verification",
+      desc: "Every exporter passes CAC, NEPC and identity checks before listing. No anonymous sellers, no fake profiles.",
+      stat: "CAC", statLabel: "+ NEPC Checked", accent: C.white,
     },
     {
       icon: Truck, title: "Tracked Shipments",
       desc: "Real-time status updates from origin to destination. Know exactly where your goods are at every stage.",
-      stat: "38", statLabel: "Countries Served", accent: C.gold,
+      stat: "Live", statLabel: "Logistics Tracking", accent: C.gold,
     },
   ];
 
   return (
     <section style={{ padding: "100px 0", background: C.greenDeep, position: "relative", overflow: "hidden" }}>
-      {/* Grid */}
       <div style={{
         position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
-        backgroundImage: `
-          linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)
-        `,
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)`,
         backgroundSize: "60px 60px",
       }} />
-
-      {/* Watermark */}
       <div style={{
         position: "absolute", left: 0, bottom: "5%",
         fontFamily: "'Barlow Condensed', sans-serif",
@@ -914,7 +919,6 @@ function TrustSection() {
         color: "rgba(255,255,255,0.03)", lineHeight: 1,
         pointerEvents: "none", userSelect: "none", letterSpacing: "-0.04em",
       }}>TRUST</div>
-
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative", zIndex: 1 }}>
         <AnimatedSection>
           <div style={{ marginBottom: 56, textAlign: "center" }}>
@@ -926,7 +930,6 @@ function TrustSection() {
             }}>Why IziXport?</h2>
           </div>
         </AnimatedSection>
-
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }} className="lp-3col-grid">
           {cards.map((card, idx) => (
             <AnimatedSection key={idx} delay={idx * 120}>
@@ -957,19 +960,16 @@ function TrustSection() {
                 }}>
                   <card.icon size={22} color={C.gold} />
                 </div>
-
                 <h3 style={{
                   fontFamily: "'Barlow Condensed', sans-serif",
                   fontSize: 22, fontWeight: 800, color: C.white,
                   margin: "0 0 12px", letterSpacing: "0.01em",
                 }}>{card.title}</h3>
-
                 <p style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 13, color: "rgba(255,255,255,0.45)",
                   lineHeight: 1.75, margin: "0 0 28px", flex: 1,
                 }}>{card.desc}</p>
-
                 <div style={{
                   display: "inline-flex", alignItems: "baseline", gap: 8,
                   padding: "11px 16px", borderRadius: 8,
@@ -996,18 +996,17 @@ function TrustSection() {
 }
 
 /* ============================================================
-   TESTIMONIALS — unchanged logic
+   TESTIMONIALS
    ============================================================ */
 function TestimonialsSection() {
   return <Testimonials />;
 }
 
 /* ============================================================
-   DUAL CTA BANNER — bold split layout
+   DUAL CTA BANNER
    ============================================================ */
 function DualCTABanner() {
   const navigate = useNavigate();
-
   return (
     <section style={{ padding: "100px 0", background: C.white, position: "relative", overflow: "hidden" }}>
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px" }}>
@@ -1021,9 +1020,7 @@ function DualCTABanner() {
             }}>Ready to Trade?</h2>
           </div>
         </AnimatedSection>
-
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }} className="lp-2col-grid">
-          {/* Exporter — dark */}
           <AnimatedSection delay={0}>
             <div style={{
               borderRadius: 16, padding: "48px 40px",
@@ -1034,20 +1031,17 @@ function DualCTABanner() {
             }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(-5px)"; (e.currentTarget as HTMLElement).style.boxShadow = "0 24px 60px rgba(12,56,37,0.25)"; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(0)"; (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}>
-              {/* Grid bg */}
               <div style={{
                 position: "absolute", inset: 0, pointerEvents: "none",
                 backgroundImage: `linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)`,
                 backgroundSize: "40px 40px",
               }} />
-              {/* Gold accent number */}
               <div style={{
                 position: "absolute", right: -10, bottom: -20,
                 fontFamily: "'Barlow Condensed', sans-serif",
                 fontSize: 160, fontWeight: 900, color: "rgba(212,168,67,0.07)",
                 lineHeight: 1, letterSpacing: "-0.04em", userSelect: "none",
               }}>01</div>
-
               <div style={{ position: "relative", zIndex: 1 }}>
                 <div style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
@@ -1060,20 +1054,17 @@ function DualCTABanner() {
                     For Nigerian Exporters
                   </span>
                 </div>
-
                 <h3 style={{
                   fontFamily: "'Barlow Condensed', sans-serif",
                   fontSize: "clamp(28px, 3.5vw, 40px)", fontWeight: 900,
                   color: C.white, margin: "0 0 14px", lineHeight: 1.05,
                   letterSpacing: "-0.02em",
                 }}>Are you a Nigerian<br />Exporter?</h3>
-
                 <p style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 14, color: "rgba(255,255,255,0.45)",
                   lineHeight: 1.75, margin: "0 0 32px", maxWidth: 340,
                 }}>Get verified and start reaching international buyers today. Free to list.</p>
-
                 <button onClick={() => navigate("/signup?type=exporter")} style={{
                   display: "inline-flex", alignItems: "center", gap: 8,
                   padding: "14px 28px", borderRadius: 9,
@@ -1090,8 +1081,6 @@ function DualCTABanner() {
               </div>
             </div>
           </AnimatedSection>
-
-          {/* Buyer — light */}
           <AnimatedSection delay={120}>
             <div style={{
               borderRadius: 16, padding: "48px 40px",
@@ -1108,7 +1097,6 @@ function DualCTABanner() {
                 fontSize: 160, fontWeight: 900, color: "rgba(12,56,37,0.04)",
                 lineHeight: 1, letterSpacing: "-0.04em", userSelect: "none",
               }}>02</div>
-
               <div style={{ position: "relative", zIndex: 1 }}>
                 <div style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
@@ -1121,20 +1109,17 @@ function DualCTABanner() {
                     For Global Buyers
                   </span>
                 </div>
-
                 <h3 style={{
                   fontFamily: "'Barlow Condensed', sans-serif",
                   fontSize: "clamp(28px, 3.5vw, 40px)", fontWeight: 900,
                   color: C.gray900, margin: "0 0 14px", lineHeight: 1.05,
                   letterSpacing: "-0.02em",
                 }}>Are you a Global<br />Buyer?</h3>
-
                 <p style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 14, color: C.gray500,
                   lineHeight: 1.75, margin: "0 0 32px", maxWidth: 340,
                 }}>Browse verified Nigerian suppliers in 60 seconds. Escrow-protected transactions.</p>
-
                 <button onClick={() => navigate("/signup?type=buyer")} style={{
                   display: "inline-flex", alignItems: "center", gap: 8,
                   padding: "14px 28px", borderRadius: 9,
@@ -1182,15 +1167,12 @@ function Footer() {
   return (
     <>
       <footer style={{ background: C.gray900, color: C.gray400 }}>
-        {/* Gold separator */}
         <div style={{
           height: 2, width: "100%",
           background: `linear-gradient(90deg, transparent 0%, ${C.greenDeep} 20%, ${C.gold} 50%, ${C.greenDeep} 80%, transparent 100%)`,
         }} />
-
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "64px 28px 48px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr", gap: "40px 32px" }} className="lp-footer-grid">
-            {/* Brand */}
             <div>
               <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid rgba(255,255,255,0.1)`, display: "inline-flex", marginBottom: 20 }}>
                 <img src="/logo.jpeg" alt="IziXport" style={{ height: 40, width: "auto", display: "block" }} />
@@ -1224,8 +1206,6 @@ function Footer() {
                 ))}
               </div>
             </div>
-
-            {/* Platform */}
             <div>
               <h4 style={{
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -1249,8 +1229,6 @@ function Footer() {
                 ))}
               </ul>
             </div>
-
-            {/* Company */}
             <div>
               <h4 style={{
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -1275,8 +1253,6 @@ function Footer() {
                 ))}
               </ul>
             </div>
-
-            {/* Contact */}
             <div>
               <h4 style={{
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -1305,8 +1281,6 @@ function Footer() {
                   <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 13, lineHeight: 1.65 }}>Victoria Island,<br />Lagos, Nigeria.</span>
                 </li>
               </ul>
-
-              {/* Security badge */}
               <div style={{
                 marginTop: 24, padding: "13px 14px", borderRadius: 10,
                 background: "rgba(0,107,63,0.1)", border: "1px solid rgba(0,107,63,0.2)",
@@ -1320,7 +1294,6 @@ function Footer() {
             </div>
           </div>
         </div>
-
         <div style={{ borderTop: `1px solid ${C.gray800}` }}>
           <div style={{
             maxWidth: 1200, margin: "0 auto", padding: "20px 28px",
@@ -1328,16 +1301,14 @@ function Footer() {
             flexWrap: "wrap", gap: 8,
           }}>
             <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 12, color: C.gray600, margin: 0 }}>
-              © 2026 IziXport Technologies Ltd. All rights reserved.
+              &copy; 2026 IziXport Technologies Ltd. All rights reserved.
             </p>
             <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 12, color: C.gray600, margin: 0 }}>
-              Made with ♥ in Lagos, Nigeria 🇳🇬
+              Made with &hearts; in Lagos, Nigeria &#127475;&#127468;
             </p>
           </div>
         </div>
       </footer>
-
-      {/* Modals — unchanged content */}
       <Modal open={modal?.type === "about"} onClose={() => setModal(null)} title="About IziXport">
         <p style={{ marginBottom: 14 }}>IziXport is Nigeria's premier verified trade marketplace, connecting exporters with global buyers through a secure, end-to-end platform.</p>
         <p style={{ marginBottom: 14 }}>Founded in 2026, we're on a mission to make Nigerian export simple, trustworthy, and accessible to the world.</p>
@@ -1355,7 +1326,6 @@ function Footer() {
           </div>
         ))}
       </Modal>
-       
     </>
   );
 }
@@ -1384,6 +1354,7 @@ export default function LandingPage() {
       @keyframes lp-fadeIn  { from { opacity: 0; } to { opacity: 1; } }
       @keyframes lp-scaleUp { from { opacity: 0; transform: scale(0.95) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
       @keyframes lp-pulse   { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.8); } }
+      @keyframes lp-spin   { to { transform: rotate(360deg); } }
 
       ::-webkit-scrollbar        { width: 3px; }
       ::-webkit-scrollbar-track  { background: #F1EDE6; }
@@ -1391,7 +1362,6 @@ export default function LandingPage() {
 
       ::selection { background: rgba(12,56,37,0.15); color: #0C3825; }
 
-      /* Responsive grids */
       @media (max-width: 1024px) {
         .lp-4col-grid  { grid-template-columns: repeat(2, 1fr) !important; }
         .lp-3col-grid  { grid-template-columns: repeat(2, 1fr) !important; }
@@ -1404,16 +1374,20 @@ export default function LandingPage() {
         .lp-3col-grid  { grid-template-columns: 1fr !important; }
         .lp-footer-grid { grid-template-columns: 1fr !important; }
       }
-
-      /* Hide/show nav items at breakpoint */
+      @media (max-width: 768px) {
+        .lp-trust-grid { grid-template-columns: 1fr 1fr !important; gap: 20px !important; }
+      }
+      @media (max-width: 480px) {
+        .lp-trust-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+      }
       @media (min-width: 768px) {
         .lp-mobile-only { display: none !important; }
       }
       @media (max-width: 767px) {
         .lp-desktop-nav { display: none !important; }
       }
-
       .lp-text-center { text-align: center; }
+      .lp-spin { animation: lp-spin 1s linear infinite; }
     `;
     document.head.appendChild(style);
     return () => { void document.head.removeChild(style); };
@@ -1423,7 +1397,6 @@ export default function LandingPage() {
     <div style={{ width: "100%", minHeight: "100vh", fontFamily: "'Plus Jakarta Sans', sans-serif", background: C.white }}>
       <Navbar />
       <HeroSection />
-      {/* Remove duplicate LiveStatsBar – stats already inside HeroSection */}
       <HowItWorks />
       <FeaturedProducts />
       <TrustSection />
