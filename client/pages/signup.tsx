@@ -88,6 +88,8 @@ export default function Signup() {
 
     try {
       // 1. Sign up with Supabase Auth (email confirmation required)
+      // FIX: Removed ?role= query param from emailRedirectTo — Supabase can reject
+      //      redirect URLs with query params and fall back to the Site URL (landing page)
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: data.email.toLowerCase().trim(),
         password: data.password,
@@ -96,7 +98,7 @@ export default function Signup() {
             full_name: data.fullName.trim(),
             role: data.role,
           },
-          emailRedirectTo: `${window.location.origin}/auth/callback?role=${data.role}`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       })
 
@@ -112,7 +114,7 @@ export default function Signup() {
         return
       }
 
-      // Store role for callback handling
+      // Store role for callback handling (callback reads this + user_metadata)
       localStorage.setItem('pendingRole', data.role)
 
       // 2. Insert into public.users (email_verified starts as false)
@@ -134,14 +136,11 @@ export default function Signup() {
       toast.success('Account created! Check your email to verify.', { duration: 4000 })
 
       // 3. Redirect to Verify Email page
-      // FIX: Clear loading BEFORE navigating so React doesn't re-render and block the transition
       setLoading(false)
 
-      // Small delay lets the toast render and any auth state settle before routing
       setTimeout(() => {
         navigate('/verify-email', { 
           state: { email: data.email }
-          // FIX: Removed replace:true — it was replacing the history entry and causing the page to stick
         })
       }, 100)
 
