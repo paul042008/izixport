@@ -4,7 +4,8 @@ import {
   Shield, Lock, Truck, CheckCircle, Globe, ArrowRight, Menu,
   BarChart3, Users, TrendingUp, Building2, X, Mail, Heart,
   MapPin, Linkedin, Github, Check, CreditCard, Zap, Star,
-  Award, Twitter, Instagram, Loader2, Package,
+  Award, Twitter, Instagram, Loader2,
+  FileText, Headphones, Beaker,
 } from "lucide-react";
 
 import Testimonials from "../components/Testimonials";
@@ -176,8 +177,7 @@ function Navbar() {
   }, []);
   const navLinks = [
     { label: "Marketplace", href: "#marketplace" },
-    { label: "How it Works", href: "#how-it-works" },
-    { label: "Pricing", href: "#pricing" },
+    { label: "How it Works", path: "/how-it-works" },
   ];
   return (
     <>
@@ -199,19 +199,31 @@ function Navbar() {
               <img src="/logo.jpeg" alt="IziXport" style={{ height: 36, width: "auto", display: "block" }} />
             </div>
           </a>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }} className="lp-desktop-nav">
-            {navLinks.map(link => (
-              <a key={link.label} href={link.href} style={{
-                padding: "8px 16px", borderRadius: 8,
+          <div style={{
+            display: "flex", alignItems: "center", gap: 2,
+            padding: 4, borderRadius: 10,
+            background: C.gray50, border: `1px solid ${C.border}`,
+          }} className="lp-desktop-nav">
+            {navLinks.map(link => {
+              const style = {
+                padding: "8px 16px", borderRadius: 7,
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
                 fontSize: 13, fontWeight: 600, color: C.gray600,
                 textDecoration: "none", transition: "all 0.15s",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.background = C.greenLight; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.gray600; (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
-                {link.label}
-              </a>
-            ))}
+                background: "transparent", border: "none", cursor: "pointer",
+              } as React.CSSProperties;
+              const hoverIn = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.background = C.white; };
+              const hoverOut = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.color = C.gray600; (e.currentTarget as HTMLElement).style.background = "transparent"; };
+              return link.path ? (
+                <button key={link.label} onClick={() => navigate(link.path)} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                  {link.label}
+                </button>
+              ) : (
+                <a key={link.label} href={link.href} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                  {link.label}
+                </a>
+              );
+            })}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }} className="lp-desktop-nav">
             <button onClick={() => navigate("/login")} style={{
@@ -238,9 +250,9 @@ function Navbar() {
             </button>
           </div>
           <button className="lp-mobile-only" onClick={() => setMobileOpen(!mobileOpen)} style={{
-            background: C.greenLight, border: "none", borderRadius: 8,
+            background: C.greenDeep, border: "none", borderRadius: 8,
             width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", color: C.greenBright,
+            cursor: "pointer", color: C.gold,
           }}>
             {mobileOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
@@ -265,20 +277,29 @@ function Navbar() {
           </button>
         </div>
         <div style={{ flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {navLinks.map(link => (
-            <a key={link.label} href={link.href} onClick={() => setMobileOpen(false)} style={{
+          {navLinks.map(link => {
+            const style = {
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "13px 14px", borderRadius: 10,
               fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: 14, fontWeight: 600, color: C.gray700,
               textDecoration: "none", transition: "all 0.15s",
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenLight; (e.currentTarget as HTMLElement).style.color = C.greenBright; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.gray700; }}>
-              {link.label}
-              <ArrowRight size={14} style={{ color: C.greenBright, opacity: 0.5 }} />
-            </a>
-          ))}
+              width: "100%", background: "transparent", border: "none", cursor: "pointer", textAlign: "left",
+            } as React.CSSProperties;
+            const hoverIn = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = C.greenLight; (e.currentTarget as HTMLElement).style.color = C.greenBright; };
+            const hoverOut = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.gray700; };
+            return link.path ? (
+              <button key={link.label} onClick={() => { navigate(link.path); setMobileOpen(false); }} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                {link.label}
+                <ArrowRight size={14} style={{ color: C.greenBright, opacity: 0.5 }} />
+              </button>
+            ) : (
+              <a key={link.label} href={link.href} onClick={() => setMobileOpen(false)} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                {link.label}
+                <ArrowRight size={14} style={{ color: C.greenBright, opacity: 0.5 }} />
+              </a>
+            );
+          })}
         </div>
         <div style={{ padding: "16px 20px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
           <button onClick={() => navigate("/login")} style={{
@@ -301,24 +322,68 @@ function Navbar() {
 /* ============================================================
    HERO
    ============================================================ */
+const HERO_CONTENT = {
+  exporter: {
+    eyebrow: "Nigeria's Trusted Trade Marketplace",
+    heading: (
+      <>Where Nigeria<br /><span style={{ color: "#E8C96A" }}>Trades</span> With<br />The World.</>
+    ),
+    body: (
+      <>Get verified, list your commodities, and reach global buyers through a{" "}
+        <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+          secure, end-to-end platform
+        </span>{" "}
+        — escrow-protected payments and tracked shipments, every trade.</>
+    ),
+    primaryLabel: "Start Exporting",
+    primaryPath: "/signup?type=exporter",
+    secondaryLabel: "See How It Works",
+    secondaryPath: "/how-it-works",
+    tags: [
+      { icon: CheckCircle, label: "Free to List" },
+      { icon: Lock, label: "Escrow Protected" },
+      { icon: Truck, label: "Real-time Tracking" },
+    ],
+  },
+  buyer: {
+    eyebrow: "Source Verified Nigerian Goods",
+    heading: (
+      <>Source Nigerian<br /><span style={{ color: "#E8C96A" }}>Agro‑Goods</span> With<br />Confidence.</>
+    ),
+    body: (
+      <>Browse verified Nigerian exporters and buy commodities through a{" "}
+        <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+          secure, end-to-end platform
+        </span>{" "}
+        — your payment stays in escrow until you confirm delivery.</>
+    ),
+    primaryLabel: "Find Suppliers",
+    primaryPath: "/signup?type=buyer",
+    secondaryLabel: "See How It Works",
+    secondaryPath: "/how-it-works",
+    tags: [
+      { icon: CheckCircle, label: "Verified Exporters" },
+      { icon: Lock, label: "Escrow Protected" },
+      { icon: Truck, label: "Real-time Tracking" },
+    ],
+  },
+};
+
 function HeroSection() {
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState<"exporter" | "buyer">("exporter");
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 80);
     return () => clearTimeout(t);
   }, []);
-  const trustPillars = [
-    { icon: Shield, title: "Verified Exporters", desc: "CAC + NEPC checked" },
-    { icon: Lock, title: "Escrow Secured", desc: "Payment on delivery" },
-    { icon: Truck, title: "Tracked Shipments", desc: "Real-time logistics" },
-    { icon: Award, title: "Bank-Grade Security", desc: "256-bit encrypted" },
-  ];
+  const content = HERO_CONTENT[mode];
   return (
     <section style={{
-      position: "relative", minHeight: "100vh",
+      position: "relative", minHeight: "92vh",
       display: "flex", flexDirection: "column",
       background: C.greenDeep, overflow: "hidden",
+      paddingBottom: 56,
     }}>
       <div style={{
         position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
@@ -349,6 +414,27 @@ function HeroSection() {
         transition: "opacity 0.9s ease-out, transform 0.9s cubic-bezier(0.16,1,0.3,1)",
       }}>
         <div style={{
+          display: "inline-flex", padding: 4, borderRadius: 10, gap: 4,
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          alignSelf: "flex-start", marginBottom: 32,
+        }}>
+          {(["exporter", "buyer"] as const).map(tab => (
+            <button key={tab} onClick={() => setMode(tab)} style={{
+              padding: "9px 20px", borderRadius: 7,
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+              fontSize: 12.5, fontWeight: 700,
+              background: mode === tab ? C.gold : "transparent",
+              color: mode === tab ? C.greenDeep : "rgba(255,255,255,0.65)",
+              border: "none", cursor: "pointer",
+              transition: "all 0.25s ease",
+              display: "flex", alignItems: "center", gap: 7,
+            }}>
+              {tab === "exporter" ? "I'm an Exporter" : "I'm a Buyer"}
+            </button>
+          ))}
+        </div>
+        <div style={{
           display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 28,
           padding: "8px 16px", borderRadius: 6,
           border: `1px solid rgba(212,168,67,0.25)`,
@@ -359,7 +445,7 @@ function HeroSection() {
             fontFamily: "'Plus Jakarta Sans', sans-serif",
             fontSize: 10, fontWeight: 800, letterSpacing: "0.22em",
             textTransform: "uppercase", color: C.gold,
-          }}>Africa's #1 Verified Trade Marketplace</span>
+          }}>{content.eyebrow}</span>
         </div>
         <h1 style={{
           fontFamily: "'Barlow Condensed', sans-serif",
@@ -370,9 +456,7 @@ function HeroSection() {
           margin: "0 0 28px",
           maxWidth: 900,
         }}>
-          Where Nigeria<br />
-          <span style={{ color: C.gold }}>Trades</span> With<br />
-          The World.
+          {content.heading}
         </h1>
         <p style={{
           fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -381,14 +465,10 @@ function HeroSection() {
           fontWeight: 400, lineHeight: 1.75,
           maxWidth: 560, margin: "0 0 44px",
         }}>
-          Connecting verified Nigerian exporters with global buyers through a{" "}
-          <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
-            secure, end-to-end platform
-          </span>{" "}
-          — no middlemen, full escrow, real-time tracking.
+          {content.body}
         </p>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 64 }}>
-          <button onClick={() => navigate("/signup?type=exporter")} style={{
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 48 }}>
+          <button onClick={() => navigate(content.primaryPath)} style={{
             padding: "15px 32px", borderRadius: 9,
             fontFamily: "'Plus Jakarta Sans', sans-serif",
             fontSize: 14, fontWeight: 700, color: C.greenDeep,
@@ -399,29 +479,26 @@ function HeroSection() {
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#E0B94F"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = C.gold; (e.currentTarget as HTMLElement).style.transform = "translateY(0)"; }}>
-            Start Exporting <ArrowRight size={15} />
+            {content.primaryLabel} <ArrowRight size={15} />
           </button>
-          <button onClick={() => navigate("/signup?type=buyer")} style={{
+          <button onClick={() => navigate(content.secondaryPath)} style={{
             padding: "15px 32px", borderRadius: 9,
             fontFamily: "'Plus Jakarta Sans', sans-serif",
-            fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.85)",
-            background: "rgba(255,255,255,0.07)",
-            border: "1px solid rgba(255,255,255,0.15)",
+            fontSize: 14, fontWeight: 600, color: C.white,
+            background: "rgba(255,255,255,0.15)",
+            border: "1px solid rgba(255,255,255,0.35)",
             cursor: "pointer",
             display: "flex", alignItems: "center", gap: 8,
             transition: "all 0.2s",
+            backdropFilter: "blur(4px)",
           }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.12)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.3)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.15)"; }}>
-            Find Suppliers <ArrowRight size={15} />
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.25)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.6)"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.15)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.35)"; }}>
+            {content.secondaryLabel} <ArrowRight size={15} />
           </button>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 48 }}>
-          {[
-            { icon: CheckCircle, label: "100% Verified Suppliers" },
-            { icon: Lock, label: "Escrow Protected" },
-            { icon: Truck, label: "Real-time Tracking" },
-          ].map(({ icon: Icon, label }) => (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {content.tags.map(({ icon: Icon, label }) => (
             <div key={label} style={{
               display: "inline-flex", alignItems: "center", gap: 8,
               padding: "9px 16px", borderRadius: 7,
@@ -436,53 +513,10 @@ function HeroSection() {
           ))}
         </div>
       </div>
-      <div style={{ position: "relative", zIndex: 20 }}>
-        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "0 28px" }}>
-          <div style={{
-            background: C.white,
-            borderRadius: 18,
-            boxShadow: "0 24px 64px rgba(0,0,0,0.10)",
-            border: `1px solid ${C.border}`,
-            overflow: "hidden",
-            padding: "36px 40px",
-          }}>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 28,
-            }} className="lp-trust-grid">
-              {trustPillars.map(({ icon: Icon, title, desc }) => (
-                <div key={title} style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div style={{
-                    width: 46, height: 46, borderRadius: 11,
-                    background: C.greenDeep,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    flexShrink: 0,
-                    boxShadow: "0 6px 18px rgba(12,56,37,0.22)",
-                  }}>
-                    <Icon size={20} color={C.gold} />
-                  </div>
-                  <div>
-                    <div style={{
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      fontSize: 17, fontWeight: 800, color: C.gray900,
-                      letterSpacing: "0.01em", lineHeight: 1.2,
-                    }}>{title}</div>
-                    <div style={{
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 12, color: C.gray500, marginTop: 3,
-                      fontWeight: 500,
-                    }}>{desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
     </section>
   );
 }
+
 
 /* ============================================================
    HOW IT WORKS
@@ -626,256 +660,112 @@ function HowItWorks() {
     </section>
   );
 }
-
 /* ============================================================
-   FEATURED PRODUCTS — Fetched from Supabase, max 4
+   PRODUCTS TRADED — simple showcase of agro commodities
    ============================================================ */
-const COMMODITY_META: Record<string, { accent: string; bg: string }> = {
-  "Cashew Nuts":   { accent: "#B87840", bg: "rgba(184,120,64,0.06)" },
-  "Cocoa Beans":   { accent: "#8B5E3C", bg: "rgba(139,94,60,0.06)" },
-  "Sesame Seeds":  { accent: "#C4A84A", bg: "rgba(196,168,74,0.06)" },
-  "Shea Butter":   { accent: "#6AAD5A", bg: "rgba(106,173,90,0.06)" },
-  "Hibiscus":      { accent: "#C06080", bg: "rgba(192,96,128,0.06)" },
-  "Ginger":        { accent: "#D4A843", bg: "rgba(212,168,67,0.06)" },
-  "Palm Oil":      { accent: "#D4721A", bg: "rgba(212,114,26,0.06)" },
-  "Pepper":        { accent: "#D45050", bg: "rgba(212,80,80,0.06)" },
-};
-
-const COMMODITY_EMOJI: Record<string, string> = {
-  "cashew": "🥜", "cocoa": "🍫", "sesame": "🌾", "shea": "🫙",
-  "hibiscus": "🌺", "ginger": "🫚", "palm": "🛢️", "pepper": "🌶️",
-};
-
-function getCommodityMeta(title: string, category: string) {
-  const text = (title + " " + category).toLowerCase();
-  for (const [key, meta] of Object.entries(COMMODITY_META)) {
-    if (text.includes(key.toLowerCase())) return { ...meta, emoji: COMMODITY_EMOJI[key.toLowerCase()] || "📦" };
-  }
-  for (const [key, meta] of Object.entries(COMMODITY_META)) {
-    if (category?.toLowerCase().includes(key.toLowerCase())) return { ...meta, emoji: COMMODITY_EMOJI[key.toLowerCase()] || "📦" };
-  }
-  return { accent: C.greenBright, bg: C.greenLight, emoji: "📦" };
-}
-
-interface ListingItem {
-  id: string;
-  title: string;
-  price_per_unit: number;
-  currency: string;
-  unit: string;
-  min_order_quantity: number;
-  available_quantity: number;
-  origin_state: string;
-  category: string;
-  exporter_name: string;
-  photos: string[] | null;
-}
-
-function FeaturedProducts() {
-  const navigate = useNavigate();
-  const [listings, setListings] = useState<ListingItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchListings = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("listings")
-        .select(`
-          id, title, price_per_unit, currency, unit,
-          min_order_quantity, available_quantity, origin_state,
-          category, photos,
-          exporter:users!listings_exporter_id_fkey(company_name, full_name)
-        `)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(4);
-
-      if (!error && data) {
-        setListings(data.map((l: any) => ({
-          id: l.id,
-          title: l.title,
-          price_per_unit: l.price_per_unit || 0,
-          currency: l.currency || "USD",
-          unit: l.unit || "ton",
-          min_order_quantity: l.min_order_quantity || 1,
-          available_quantity: l.available_quantity || 0,
-          origin_state: l.origin_state || "Nigeria",
-          category: l.category || "",
-          exporter_name: l.exporter?.company_name || l.exporter?.full_name || "Verified Exporter",
-          photos: l.photos || null,
-        })));
-      }
-      setLoading(false);
-    };
-    fetchListings();
-  }, []);
-
-  return (
-    <section id="marketplace" style={{ padding: "100px 0", background: C.bg, position: "relative", overflow: "hidden" }}>
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        backgroundImage: `radial-gradient(circle at 1px 1px, rgba(12,56,37,0.055) 1px, transparent 0)`,
-        backgroundSize: "36px 36px",
-        opacity: 0.5,
-      }} />
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative" }}>
-        <AnimatedSection>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20, marginBottom: 52 }}>
-            <div>
-              <Label>Live Listings</Label>
+   const AGRO_PRODUCTS = [
+    { name: "Cashew Nuts",   image: "/cashew-nuts.jpg", accent: "#B87840", bg: "rgba(184,120,64,0.08)" },
+    { name: "Cocoa Beans",   image: "/cocoa-beans.jpg", accent: "#8B5E3C", bg: "rgba(139,94,60,0.08)" },
+    { name: "Sesame Seeds",  image: "/sesame-seeds.jpg", accent: "#C4A84A", bg: "rgba(196,168,74,0.08)" },
+    { name: "Shea Butter",   image: "/shea-butter.jpg", accent: "#6AAD5A", bg: "rgba(106,173,90,0.08)" },
+    { name: "Hibiscus",      image: "/ginger.jpg", accent: "#C06080", bg: "rgba(192,96,128,0.08)" },
+    { name: "Ginger",        image: "/hibiscus.jpg", accent: "#D4A843", bg: "rgba(212,168,67,0.08)" },
+    { name: "Palm Oil",      image: "/palm-oil.png", accent: "#D4721A", bg: "rgba(212,114,26,0.08)" },
+    { name: "Chili Pepper",  image: "/chili-pepper.jpg", accent: "#D45050", bg: "rgba(212,80,80,0.08)" },
+  ];
+  
+  function FeaturedProducts() {
+    const navigate = useNavigate();
+    return (
+      <section id="marketplace" style={{ padding: "100px 0", background: C.bg, position: "relative", overflow: "hidden" }}>
+        <div style={{
+          position: "absolute", inset: 0, pointerEvents: "none",
+          backgroundImage: `radial-gradient(circle at 1px 1px, rgba(12,56,37,0.055) 1px, transparent 0)`,
+          backgroundSize: "36px 36px",
+          opacity: 0.5,
+        }} />
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative" }}>
+          <AnimatedSection>
+            <div style={{ marginBottom: 44 }}>
+              <Label>Marketplace</Label>
               <h2 style={{
                 fontFamily: "'Barlow Condensed', sans-serif",
                 fontSize: "clamp(38px, 6vw, 78px)", fontWeight: 900,
-                color: C.gray900, letterSpacing: "-0.03em", margin: 0,
-              }}>Browse Active Listings</h2>
-            </div>
-            <p style={{
-              fontFamily: "'Plus Jakarta Sans', sans-serif",
-              fontSize: 14, color: C.gray500, maxWidth: 360, lineHeight: 1.75,
-            }}>
-              Real products from verified Nigerian exporters. Join to start trading.
-            </p>
-          </div>
-        </AnimatedSection>
-
-        {loading ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
-            {[1,2,3,4].map(i => (
-              <div key={i} style={{ background: C.white, borderRadius: 14, border: `1px solid ${C.border}`, overflow: "hidden", height: 380 }}>
-                <div style={{ height: 150, background: C.gray100, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Loader2 size={24} color={C.gray400} className="lp-spin" />
-                </div>
-                <div style={{ padding: 20 }}>
-                  <div style={{ width: "70%", height: 18, background: C.gray100, borderRadius: 4, marginBottom: 12 }} />
-                  <div style={{ width: "50%", height: 14, background: C.gray100, borderRadius: 4, marginBottom: 16 }} />
-                  <div style={{ width: "40%", height: 28, background: C.gray100, borderRadius: 4 }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : listings.length === 0 ? (
-          <AnimatedSection>
-            <div style={{ textAlign: "center", padding: 60, background: C.white, borderRadius: 16, border: `1px solid ${C.border}` }}>
-              <Package size={40} color={C.gray400} style={{ margin: "0 auto 16px" }} />
-              <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 16, color: C.gray600, fontWeight: 600 }}>
-                No active listings yet. Be the first to list!
+                color: C.gray900, letterSpacing: "-0.03em", margin: "0 0 12px",
+              }}>Agro Products We Trade</h2>
+              <p style={{
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                fontSize: 15, color: C.gray500, maxWidth: 640, lineHeight: 1.7,
+              }}>
+                Nigerian exporters on IziXport list a range of agro-commodities for global buyers — here's what's traded on the platform.
               </p>
             </div>
           </AnimatedSection>
-        ) : (
+  
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
-            {listings.map((item, i) => {
-              const meta = getCommodityMeta(item.title, item.category);
-              return (
-                <AnimatedSection key={item.id} delay={i * 90}>
+            {AGRO_PRODUCTS.map((item, i) => (
+              <AnimatedSection key={item.name} delay={i * 80}>
+                <div style={{
+                  background: C.white, borderRadius: 14,
+                  border: `1px solid ${C.border}`,
+                  overflow: "hidden", height: "100%",
+                  transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+                  cursor: "default",
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.transform = "translateY(-6px)";
+                  (e.currentTarget as HTMLElement).style.boxShadow = `0 24px 60px rgba(0,0,0,0.1)`;
+                  (e.currentTarget as HTMLElement).style.borderColor = item.accent;
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+                  (e.currentTarget as HTMLElement).style.boxShadow = "none";
+                  (e.currentTarget as HTMLElement).style.borderColor = C.border;
+                }}>
+                  <div style={{ height: 3, background: item.accent }} />
                   <div style={{
-                    background: C.white, borderRadius: 14,
-                    border: `1px solid ${C.border}`,
-                    overflow: "hidden", height: "100%",
-                    display: "flex", flexDirection: "column",
-                    transition: "all 0.3s cubic-bezier(0.34,1.56,0.64,1)",
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLElement).style.transform = "translateY(-6px)";
-                    (e.currentTarget as HTMLElement).style.boxShadow = `0 24px 60px rgba(0,0,0,0.1)`;
-                    (e.currentTarget as HTMLElement).style.borderColor = meta.accent;
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
-                    (e.currentTarget as HTMLElement).style.boxShadow = "none";
-                    (e.currentTarget as HTMLElement).style.borderColor = C.border;
+                    height: 220, background: item.bg,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    overflow: "hidden",
                   }}>
-                    <div style={{ height: 3, background: meta.accent }} />
-                    <div style={{
-                      height: 150, background: meta.bg,
-                      display: "flex", flexDirection: "column",
-                      alignItems: "center", justifyContent: "center", gap: 10,
-                      position: "relative",
-                    }}>
-                      {item.photos && item.photos.length > 0 ? (
-                        <img src={item.photos[0]} alt={item.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <span style={{ fontSize: 52, lineHeight: 1 }}>{meta.emoji}</span>
-                      )}
-                      <span style={{
-                        fontFamily: "'Plus Jakarta Sans', sans-serif",
-                        fontSize: 10, fontWeight: 700, color: C.gray500,
-                        textTransform: "uppercase", letterSpacing: "0.12em",
-                        display: "flex", alignItems: "center", gap: 4,
-                        position: "absolute", bottom: 10, left: 10,
-                        background: "rgba(255,255,255,0.9)", padding: "3px 10px", borderRadius: 5,
-                      }}>
-                        <MapPin size={9} /> {item.origin_state}
-                      </span>
-                      <div style={{
-                        position: "absolute", top: 11, right: 11,
-                        background: C.greenDeep, borderRadius: 5,
-                        padding: "3px 9px", display: "flex", alignItems: "center", gap: 4,
-                      }}>
-                        <CheckCircle size={9} color={C.gold} />
-                        <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 9, fontWeight: 800, color: C.white, letterSpacing: "0.08em" }}>VERIFIED</span>
-                      </div>
-                    </div>
-                    <div style={{ padding: "20px", flex: 1, display: "flex", flexDirection: "column" }}>
-                      <h3 style={{
-                        fontFamily: "'Barlow Condensed', sans-serif",
-                        fontSize: 22, fontWeight: 900, color: C.gray900,
-                        margin: "0 0 3px", letterSpacing: "0.01em",
-                      }}>{item.title}</h3>
-                      <p style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11, color: C.gray400, fontWeight: 600, margin: "0 0 12px" }}>
-                        {item.exporter_name}
-                      </p>
-                      <div style={{
-                        fontFamily: "'Barlow Condensed', sans-serif",
-                        fontSize: 28, fontWeight: 900, color: meta.accent,
-                        lineHeight: 1, marginBottom: 10,
-                      }}>
-                        {item.currency === "USD" ? "$" : item.currency + " "}{item.price_per_unit.toLocaleString()}/{item.unit}
-                      </div>
-                      <div style={{
-                        display: "flex", justifyContent: "space-between",
-                        fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: 11,
-                        color: C.gray400, fontWeight: 600, marginBottom: 18,
-                      }}>
-                        <span>Min: {item.min_order_quantity} {item.unit}</span>
-                        <span style={{ color: "#10B981", fontWeight: 700 }}>● In Stock</span>
-                      </div>
-                      <button onClick={() => navigate("/login")} style={{
-                        marginTop: "auto", width: "100%", padding: "11px",
-                        borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                        fontFamily: "'Plus Jakarta Sans', sans-serif",
-                        background: "transparent", color: C.greenBright,
-                        border: `1.5px solid rgba(0,107,63,0.22)`,
-                        transition: "all 0.18s",
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
                       }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenDeep; (e.currentTarget as HTMLElement).style.color = C.white; (e.currentTarget as HTMLElement).style.borderColor = C.greenDeep; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,107,63,0.22)"; }}>
-                        Enquire Now
-                      </button>
-                    </div>
+                    />
                   </div>
-                </AnimatedSection>
-              );
-            })}
+                  <div style={{ padding: "18px 20px" }}>
+                    <h3 style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 21, fontWeight: 900, color: C.gray900,
+                      margin: 0, letterSpacing: "0.01em",
+                    }}>{item.name}</h3>
+                  </div>
+                </div>
+              </AnimatedSection>
+            ))}
           </div>
-        )}
+  
 
         <AnimatedSection delay={350}>
           <div style={{ textAlign: "center", marginTop: 48 }}>
-            <a href="/login" style={{
+            <button onClick={() => navigate("/signup?type=exporter")} style={{
               display: "inline-flex", alignItems: "center", gap: 8,
               padding: "13px 28px", borderRadius: 9,
               fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: 14, fontWeight: 700, color: C.greenBright,
               background: C.white, border: `1.5px solid rgba(0,107,63,0.2)`,
-              textDecoration: "none", transition: "all 0.18s",
+              cursor: "pointer", transition: "all 0.18s",
             }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.greenDeep; (e.currentTarget as HTMLElement).style.color = C.white; (e.currentTarget as HTMLElement).style.borderColor = C.greenDeep; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = C.white; (e.currentTarget as HTMLElement).style.color = C.greenBright; (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,107,63,0.2)"; }}>
-              View All Listings <ArrowRight size={15} />
-            </a>
+              List Your Product <ArrowRight size={15} />
+            </button>
           </div>
         </AnimatedSection>
       </div>
@@ -883,26 +773,33 @@ function FeaturedProducts() {
   );
 }
 
+
 /* ============================================================
-   TRUST SECTION — FAKE STATS REPLACED WITH TRUST-BUILDING COPY
+   TRUST SECTION — Platform depth & social proof
    ============================================================ */
 function TrustSection() {
   const cards = [
     {
-      icon: Lock, title: "Escrow Protection",
-      desc: "Funds are held securely in escrow until delivery is physically confirmed — zero payment risk for buyers and sellers.",
-      stat: "100%", statLabel: "Payment Security", accent: C.gold,
+      icon: Beaker, title: "Sample Before You Buy",
+      desc: "Request product samples, lab certificates, and pre-shipment inspection reports before committing to bulk orders.",
     },
     {
-      icon: Shield, title: "Document Verification",
-      desc: "Every exporter passes CAC, NEPC and identity checks before listing. No anonymous sellers, no fake profiles.",
-      stat: "CAC", statLabel: "+ NEPC Checked", accent: C.white,
+      icon: FileText, title: "Export Paperwork Support",
+      desc: "We guide exporters through NEPC registration, NXP processing, and customs documentation — so nothing gets held up at the port.",
     },
     {
-      icon: Truck, title: "Tracked Shipments",
-      desc: "Real-time status updates from origin to destination. Know exactly where your goods are at every stage.",
-      stat: "Live", statLabel: "Logistics Tracking", accent: C.gold,
+      icon: Headphones, title: "Dispute Mediation",
+      desc: "Our Lagos-based trade team steps in to mediate any issues. You're never left alone in a transaction.",
     },
+    {
+      icon: Globe, title: "Global Logistics Network",
+      desc: "Connected to freight forwarders and shipping lines across Europe, Asia, and the Americas for seamless delivery.",
+    },
+  ];
+
+  const credentials = [
+    { label: "CAC Registered", desc: "Registered business in Nigeria" },
+    { label: "Escrow by Pandacrow", desc: "Secure payments powered by our escrow partner" },
   ];
 
   return (
@@ -922,21 +819,28 @@ function TrustSection() {
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px", position: "relative", zIndex: 1 }}>
         <AnimatedSection>
           <div style={{ marginBottom: 56, textAlign: "center" }}>
-            <Label light>Why Thousands Choose Us</Label>
+            <Label light>Platform Depth</Label>
             <h2 style={{
               fontFamily: "'Barlow Condensed', sans-serif",
               fontSize: "clamp(44px, 7vw, 88px)", fontWeight: 900,
               color: C.white, letterSpacing: "-0.03em", margin: 0,
-            }}>Why IziXport?</h2>
+            }}>The IziXport Difference</h2>
+            <p style={{
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+              fontSize: 15, color: "rgba(255,255,255,0.45)",
+              maxWidth: 560, margin: "16px auto 0", lineHeight: 1.7,
+            }}>
+              Beyond escrow and verification — we handle the hard parts of international trade so you don't have to.
+            </p>
           </div>
         </AnimatedSection>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }} className="lp-3col-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
           {cards.map((card, idx) => (
-            <AnimatedSection key={idx} delay={idx * 120}>
+            <AnimatedSection key={idx} delay={idx * 100}>
               <div style={{
                 borderRadius: 14,
                 border: "1px solid rgba(255,255,255,0.08)",
-                padding: "36px 30px",
+                padding: "32px 26px",
                 height: "100%", display: "flex", flexDirection: "column",
                 background: "rgba(255,255,255,0.04)",
                 transition: "all 0.25s ease",
@@ -953,43 +857,75 @@ function TrustSection() {
                 (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
               }}>
                 <div style={{
-                  width: 52, height: 52, borderRadius: 11, marginBottom: 24,
+                  width: 48, height: 48, borderRadius: 11, marginBottom: 20,
                   background: "rgba(212,168,67,0.15)",
                   border: "1px solid rgba(212,168,67,0.25)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <card.icon size={22} color={C.gold} />
+                  <card.icon size={20} color={C.gold} />
                 </div>
                 <h3 style={{
                   fontFamily: "'Barlow Condensed', sans-serif",
-                  fontSize: 22, fontWeight: 800, color: C.white,
-                  margin: "0 0 12px", letterSpacing: "0.01em",
+                  fontSize: 20, fontWeight: 800, color: C.white,
+                  margin: "0 0 10px", letterSpacing: "0.01em",
                 }}>{card.title}</h3>
                 <p style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 13, color: "rgba(255,255,255,0.45)",
-                  lineHeight: 1.75, margin: "0 0 28px", flex: 1,
+                  lineHeight: 1.75, margin: 0, flex: 1,
                 }}>{card.desc}</p>
-                <div style={{
-                  display: "inline-flex", alignItems: "baseline", gap: 8,
-                  padding: "11px 16px", borderRadius: 8,
-                  background: "rgba(212,168,67,0.1)",
-                  border: "1px solid rgba(212,168,67,0.2)",
-                }}>
-                  <span style={{
-                    fontFamily: "'Barlow Condensed', sans-serif",
-                    fontSize: 28, fontWeight: 900, color: C.gold, lineHeight: 1,
-                  }}>{card.stat}</span>
-                  <span style={{
-                    fontFamily: "'Plus Jakarta Sans', sans-serif",
-                    fontSize: 11, fontWeight: 700, color: "rgba(212,168,67,0.6)",
-                    textTransform: "uppercase", letterSpacing: "0.08em",
-                  }}>{card.statLabel}</span>
-                </div>
               </div>
             </AnimatedSection>
           ))}
         </div>
+
+        <AnimatedSection delay={400}>
+          <div style={{ marginTop: 64, textAlign: "center" }}>
+            <p style={{
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+              fontSize: 11, fontWeight: 800, color: "rgba(255,255,255,0.25)",
+              letterSpacing: "0.2em", textTransform: "uppercase",
+              marginBottom: 24,
+            }}>
+              Our Credentials
+            </p>
+            <div style={{
+              display: "flex", justifyContent: "center", gap: 16,
+              flexWrap: "wrap", alignItems: "stretch", maxWidth: 640, margin: "0 auto",
+            }}>
+              {credentials.map(cred => (
+                <div key={cred.label} style={{
+                  flex: "1 1 240px",
+                  padding: "18px 22px", borderRadius: 12,
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  textAlign: "left",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <div style={{
+                    width: 38, height: 38, borderRadius: 9, flexShrink: 0,
+                    background: "rgba(212,168,67,0.15)",
+                    border: "1px solid rgba(212,168,67,0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <CheckCircle size={16} color={C.gold} />
+                  </div>
+                  <div>
+                    <div style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 15, fontWeight: 800, color: C.white,
+                      letterSpacing: "0.01em", lineHeight: 1.2,
+                    }}>{cred.label}</div>
+                    <div style={{
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 11.5, color: "rgba(255,255,255,0.4)", marginTop: 3,
+                    }}>{cred.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </AnimatedSection>
       </div>
     </section>
   );
@@ -1151,8 +1087,7 @@ function Footer() {
 
   const platformLinks = [
     { label: "Marketplace", href: "#marketplace" },
-    { label: "How It Works", href: "#how-it-works" },
-    { label: "Pricing", href: "#pricing" },
+    { label: "How It Works", path: "/how-it-works" },
     { label: "For Exporters", href: "#" },
     { label: "For Buyers", href: "#" },
   ];
@@ -1214,19 +1149,29 @@ function Footer() {
                 margin: "0 0 20px",
               }}>Platform</h4>
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-                {platformLinks.map(link => (
-                  <li key={link.label}>
-                    <a href={link.href} style={{
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 13, fontWeight: 500, color: C.gray500,
-                      textDecoration: "none", transition: "color 0.15s",
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = C.white; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = C.gray500; }}>
-                      {link.label}
-                    </a>
-                  </li>
-                ))}
+                {platformLinks.map(link => {
+                  const style = {
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
+                    fontSize: 13, fontWeight: 500, color: C.gray500,
+                    textDecoration: "none", transition: "color 0.15s",
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                  } as React.CSSProperties;
+                  const hoverIn = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.color = C.white; };
+                  const hoverOut = (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.color = C.gray500; };
+                  return (
+                    <li key={link.label}>
+                      {link.path ? (
+                        <button onClick={() => navigate(link.path)} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                          {link.label}
+                        </button>
+                      ) : (
+                        <a href={link.href} style={style} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
+                          {link.label}
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
             <div>
