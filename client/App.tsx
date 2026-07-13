@@ -1,12 +1,13 @@
 // src/App.tsx
 import "./global.css";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { createRoot } from "react-dom/client";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { supabase } from "@/lib/supabase/client";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
@@ -57,6 +58,125 @@ const PageLoader = () => (
   </div>
 );
 
+// ════════════════════════════════════════════════════════
+// ROUTE GUARDS
+// ════════════════════════════════════════════════════════
+
+/** Blocks unauthenticated users. Optionally checks allowed roles. */
+function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    const check = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setLoading(false); return; }
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, verification_status, verified')
+        .eq('id', session.user.id)
+        .single();
+
+      setUser({ ...session.user, ...profile });
+      setLoading(false);
+    };
+    check();
+  }, []);
+
+  if (loading) return <PageLoader />;
+
+  // Not logged in → login
+  if (!user) return <Navigate to="/login" replace />;
+
+  // Role check
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    if (user.role === 'admin') return <Navigate to="/admin" replace />;
+    if (user.role === 'exporter') return <Navigate to="/dashboard/exporter" replace />;
+    if (user.role === 'buyer') return <Navigate to="/dashboard/buyer" replace />;
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+/** Prevents logged-in users from accessing login/signup. */
+function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
+  const [loading, setLoading] = useState(true);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    const check = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setLoading(false); return; }
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, verified')
+        .eq('id', session.user.id)
+        .single();
+
+      if (profile?.role === 'admin') setRedirectTo('/admin');
+      else if (profile?.verified && profile?.role === 'exporter') setRedirectTo('/dashboard/exporter');
+      else if (profile?.verified && profile?.role === 'buyer') setRedirectTo('/dashboard/buyer');
+      else if (profile?.role === 'exporter') setRedirectTo('/onboarding/exporter');
+      else if (profile?.role === 'buyer') setRedirectTo('/onboarding/buyer');
+      else setRedirectTo('/');
+
+      setLoading(false);
+    };
+    check();
+  }, []);
+
+  if (loading) return <PageLoader />;
+  if (redirectTo) return <Navigate to={redirectTo} replace />;
+  return <>{children}</>;
+}
+
+/** Prevents verified users from re-visiting onboarding. */
+function OnboardingGuard({ children, requiredRole }: { children: React.ReactNode; requiredRole: 'exporter' | 'buyer' }) {
+  const [loading, setLoading] = useState(true);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    const check = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setRedirectTo('/login'); setLoading(false); return; }
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, verification_status, verified')
+        .eq('id', session.user.id)
+        .single();
+
+      // Already fully verified → dashboard
+      if (profile?.verified) {
+        setRedirectTo(requiredRole === 'exporter' ? '/dashboard/exporter' : '/dashboard/buyer');
+        setLoading(false);
+        return;
+      }
+
+      // Wrong role trying to access wrong onboarding path
+      if (profile?.role && profile.role !== requiredRole && profile.role !== 'user') {
+        setRedirectTo(profile.role === 'admin' ? '/admin' : `/dashboard/${profile.role}`);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+    };
+    check();
+  }, [requiredRole]);
+
+  if (loading) return <PageLoader />;
+  if (redirectTo) return <Navigate to={redirectTo} replace />;
+  return <>{children}</>;
+}
+
+// ════════════════════════════════════════════════════════
+// APP
+// ════════════════════════════════════════════════════════
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -65,46 +185,123 @@ const App = () => (
       <BrowserRouter>
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            {/* ── Public pages ─────────────────────────────── */}
+            {/* ── Public pages (redirect if logged in) ───────── */}
+            <Route element={<PublicOnlyRoute><Outlet /></PublicOnlyRoute>}>
+              <Route path="/signup" element={<Signup />} />
+              <Route path="/login" element={<Login />} />
+            </Route>
+
+            {/* ── Public pages (always accessible) ─────────── */}
             <Route path="/" element={<Index />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/login" element={<Login />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/how-it-works" element={<HowItWorksPage />} />
-
-            {/* ── Legal pages ─────────────────────────────── */}
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
-
-            {/* ── Onboarding ────────────────────────────────── */}
-            <Route path="/onboarding/exporter" element={<ExporterOnboarding />} />
-            <Route path="/onboarding/buyer" element={<BuyerOnboarding />} />
-
-            {/* ── Dashboards ────────────────────────────────── */}
-            <Route path="/dashboard/exporter" element={<ExporterDashboard />} />
-            <Route path="/dashboard/buyer" element={<BuyerDashboard />} />
-
-            {/* ── Deep‑linked pages for exporter ───────────── */}
-            <Route path="/dashboard/exporter/track" element={<ExporterTrack />} />
-            <Route path="/dashboard/exporter/add-listing" element={<AddListing />} />
-            <Route path="/dashboard/exporter/bank-details" element={<BankDetails />} />
-
-            {/* ── Generic tracking (works for both roles) ──── */}
-            <Route path="/dashboard/track" element={<Track />} />
-
-            {/* ── Deal Room ─────────────────────────────────── */}
-            <Route path="/deal/:orderId" element={<DealRoom />} />
-            <Route path="/dashboard/exporter/profile" element={<ExporterProfile />} />
-
-            {/* ── Reviews Page ────────────────────────────────── */}
             <Route path="/reviews" element={<ReviewsPage />} />
 
-            {/* ── Admin (protected inside page) ───────────────── */}
-            <Route path="/admin" element={<AdminPanel />} />
+            {/* ── Onboarding (protected + role-guarded) ──────── */}
+            <Route
+              path="/onboarding/exporter"
+              element={
+                <OnboardingGuard requiredRole="exporter">
+                  <ExporterOnboarding />
+                </OnboardingGuard>
+              }
+            />
+            <Route
+              path="/onboarding/buyer"
+              element={
+                <OnboardingGuard requiredRole="buyer">
+                  <BuyerOnboarding />
+                </OnboardingGuard>
+              }
+            />
 
-            {/* ── 404 — must stay last ────────────────────────── */}
+            {/* ── Dashboards (auth + role required) ────────── */}
+            <Route
+              path="/dashboard/exporter"
+              element={
+                <ProtectedRoute allowedRoles={['exporter']}>
+                  <ExporterDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/buyer"
+              element={
+                <ProtectedRoute allowedRoles={['buyer']}>
+                  <BuyerDashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ── Deep‑linked exporter pages ───────────────── */}
+            <Route
+              path="/dashboard/exporter/track"
+              element={
+                <ProtectedRoute allowedRoles={['exporter']}>
+                  <ExporterTrack />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/exporter/add-listing"
+              element={
+                <ProtectedRoute allowedRoles={['exporter']}>
+                  <AddListing />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/exporter/bank-details"
+              element={
+                <ProtectedRoute allowedRoles={['exporter']}>
+                  <BankDetails />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/exporter/profile"
+              element={
+                <ProtectedRoute allowedRoles={['exporter']}>
+                  <ExporterProfile />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ── Generic tracking (any authenticated user) ──── */}
+            <Route
+              path="/dashboard/track"
+              element={
+                <ProtectedRoute>
+                  <Track />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ── Deal Room (any authenticated user) ─────────── */}
+            <Route
+              path="/deal/:orderId"
+              element={
+                <ProtectedRoute>
+                  <DealRoom />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ── Admin (admin role only) ────────────────────── */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminPanel />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ── 404 ────────────────────────────────────────── */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

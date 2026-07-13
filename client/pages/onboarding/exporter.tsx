@@ -1,17 +1,11 @@
 // src/pages/onboarding/ExporterStep2.tsx
-// UPDATED — Export Readiness Checklist added (NEPC, product testing, freight forwarder, shipping experience)
-// Export readiness stored in exporter_profiles table
-// All existing CAC, NIN, bank verification logic preserved exactly
+// MANUAL REVIEW ONLY — No Dojah API verification
+// Exporter uploads documents + enters CAC/NIN as plain text
+// Admin reviews manually within 24 hours
 
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase/client';
-import {
-  verifyCACNumber,
-  verifyNINNumber,
-  CACResult,
-  NINResult,
-} from '@/lib/dojah';
 import {
   Building2, Eye, EyeOff, Upload, CheckCircle2,
   AlertTriangle, Banknote, Loader2, ChevronDown,
@@ -25,7 +19,7 @@ const COLORS = {
   primaryLight: '#E6F2ED',
   accent: '#D4A843',
   white: '#FFFFFF',
-  gray300: '#D1D5DB', 
+  gray300: '#D1D5DB',
   gray50: '#F9FAFB',
   gray100: '#F3F4F6',
   gray200: '#E5E7EB',
@@ -70,7 +64,6 @@ const STATIC_BANKS: Bank[] = [
   { id: 24, code: '400001', name: 'Palmpay' },
 ].sort((a, b) => a.name.localeCompare(b.name));
 
-// ─── EXPORT READINESS CHECKLIST ITEM ────────────────────────────────────────
 interface ReadinessItem {
   key: 'has_nepc_cert' | 'has_product_testing' | 'has_freight_forwarder' | 'has_shipped_before';
   label: string;
@@ -110,22 +103,17 @@ export default function ExporterStep2() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // CAC
+  // CAC — plain text only, stored for admin review
   const [cacInput, setCacInput] = useState('');
-  const [cacResult, setCacResult] = useState<CACResult | null>(null);
-  const [cacLoading, setCacLoading] = useState(false);
 
-  // NIN
+  // NIN — plain text only, optional, stored for admin review
   const [ninInput, setNinInput] = useState('');
   const [showNIN, setShowNIN] = useState(false);
-  const [ninResult, setNinResult] = useState<NINResult | null>(null);
-  const [ninLoading, setNinLoading] = useState(false);
 
   // Documents
   const [cacFile, setCacFile] = useState<File | null>(null);
   const [nepcFile, setNepcFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [dojahOffline, setDojahOffline] = useState(false);
 
   // Bank details
   const [banks] = useState<Bank[]>(STATIC_BANKS);
@@ -138,7 +126,7 @@ export default function ExporterStep2() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // ─── EXPORT READINESS STATE ──────────────────────────────────────────────
+  // Export readiness
   const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [readiness, setReadiness] = useState<Record<string, boolean>>({
     has_nepc_cert: false,
@@ -152,7 +140,7 @@ export default function ExporterStep2() {
   const isExportReady = readinessScore === 4;
 
   const toggleReadiness = (key: string) => {
-    setReadiness(prev => ({ ...prev, [key]: !prev[key] }));
+    setReadiness((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   // Close dropdown on outside click
@@ -172,31 +160,11 @@ export default function ExporterStep2() {
     setBankError('');
   }, [bankCode, accountNumber]);
 
-  useEffect(() => { if (cacResult) setCacResult(null); }, [cacInput]);
-  useEffect(() => { if (ninResult) setNinResult(null); }, [ninInput]);
-
-  const handleCACVerify = async () => {
-    if (!cacInput.trim()) return;
-    setCacLoading(true);
-    const result = await verifyCACNumber(cacInput);
-    setCacResult(result);
-    setCacLoading(false);
-    if (!result.verified) toast.error(result.error || 'CAC verification failed');
-    if (result.error?.includes('Network') || result.error?.includes('fetch')) setDojahOffline(true);
-  };
-
-  const handleNINVerify = async () => {
-    if (!ninInput.trim()) return;
-    setNinLoading(true);
-    const result = await verifyNINNumber(ninInput);
-    setNinResult(result);
-    setNinLoading(false);
-    if (!result.verified) toast.error(result.error || 'NIN verification failed');
-    if (result.error?.includes('Network') || result.error?.includes('fetch')) setDojahOffline(true);
-  };
-
   const handleBankVerify = async () => {
-    if (!bankCode || !accountNumber) { toast.error('Select a bank and enter an account number.'); return; }
+    if (!bankCode || !accountNumber) {
+      toast.error('Select a bank and enter an account number.');
+      return;
+    }
     setBankLoading(true);
     setBankError('');
     try {
@@ -222,7 +190,10 @@ export default function ExporterStep2() {
   const handleFileSelect = (type: 'cac' | 'nepc', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error('File must be under 5MB'); return; }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File must be under 5MB');
+      return;
+    }
     if (type === 'cac') setCacFile(file);
     else setNepcFile(file);
   };
@@ -230,51 +201,46 @@ export default function ExporterStep2() {
   const uploadFile = async (file: File, userId: string, prefix: string) => {
     const ext = file.name.split('.').pop();
     const path = `${userId}/${prefix}-${Date.now()}.${ext}`;
-    const { data, error } = await supabase.storage.from('verifications').upload(path, file, { cacheControl: '3600', upsert: false });
+    const { data, error } = await supabase.storage
+      .from('verifications')
+      .upload(path, file, { cacheControl: '3600', upsert: false });
     if (error) throw error;
     const { data: urlData } = supabase.storage.from('verifications').getPublicUrl(path);
     return urlData.publicUrl;
   };
 
   const handleSubmit = async () => {
-    const canSubmitManually = cacFile !== null && (!cacResult?.verified || !ninResult?.verified) && dojahOffline;
-    const normalSubmission = cacResult?.verified && ninResult?.verified && cacFile;
-
-    if (!bankVerified) { toast.error('Please verify your bank account before submitting.'); return; }
-    if (!normalSubmission && !canSubmitManually) { toast.error('Complete all required steps first.'); return; }
+    if (!bankVerified) {
+      toast.error('Please verify your bank account before submitting.');
+      return;
+    }
+    if (!cacFile) {
+      toast.error('Please upload your CAC certificate before submitting.');
+      return;
+    }
 
     setSubmitting(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { toast.error('Session expired. Please log in again.'); navigate('/login'); return; }
+      if (!session) {
+        toast.error('Session expired. Please log in again.');
+        navigate('/login');
+        return;
+      }
 
       const userId = session.user.id;
-      const cacUrl = await uploadFile(cacFile!, userId, 'cac');
+      const cacUrl = await uploadFile(cacFile, userId, 'cac');
       let nepcUrl: string | null = null;
       if (nepcFile) nepcUrl = await uploadFile(nepcFile, userId, 'nepc');
 
-      // Build verification record
-      const verificationData: any = {
+      const verificationData = {
         user_id: userId,
         cac_document_url: cacUrl,
         nepc_document_url: nepcUrl,
+        cac_number: cacInput?.trim() || null,
+        nin_number: ninInput?.trim() || null,
         status: 'under_review',
       };
-
-      if (normalSubmission) {
-        verificationData.cac_number = cacResult!.rc_number;
-        verificationData.cac_verified = true;
-        verificationData.cac_company_name = cacResult!.company_name;
-        verificationData.cac_company_type = cacResult!.company_type;
-        verificationData.cac_registration_date = cacResult!.registration_date;
-        verificationData.cac_verification_result = cacResult!.raw;
-        verificationData.nin_verified = true;
-      } else {
-        verificationData.cac_verified = false;
-        verificationData.nin_verified = false;
-        verificationData.status = 'pending_manual_review';
-        verificationData.admin_notes = 'Dojah unavailable during registration – manual review needed';
-      }
 
       const { error: verError } = await supabase.from('verifications').insert(verificationData);
       if (verError) throw verError;
@@ -282,21 +248,26 @@ export default function ExporterStep2() {
       // Save bank account
       const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
       const { error: bankErr } = await supabase.from('user_bank_accounts').upsert(
-        { user_id: userId, bank_code: bankCode, bank_name: selectedBankName, account_number: accountNumber, account_name: accountName, is_verified: true },
+        {
+          user_id: userId,
+          bank_code: bankCode,
+          bank_name: selectedBankName,
+          account_number: accountNumber,
+          account_name: accountName,
+          is_verified: true,
+        },
         { onConflict: 'user_id' }
       );
       if (bankErr) throw bankErr;
 
       // Update user profile
-      const userUpdate: any = {
-        verification_status: verificationData.status,
+      const { error: userUpdateError } = await supabase.from('users').update({
+        verification_status: 'under_review',
         role: 'exporter',
-      };
-      if (cacResult?.company_name) userUpdate.company_name = cacResult.company_name;
-      const { error: userUpdateError } = await supabase.from('users').update(userUpdate).eq('id', userId);
+      }).eq('id', userId);
       if (userUpdateError) throw userUpdateError;
 
-      // ─── SAVE EXPORT READINESS TO exporter_profiles ─────────────────────
+      // Save export readiness
       const exportReadyData = {
         user_id: userId,
         has_nepc_cert: readiness.has_nepc_cert,
@@ -311,20 +282,15 @@ export default function ExporterStep2() {
         .from('exporter_profiles')
         .upsert(exportReadyData, { onConflict: 'user_id' });
 
-      // Non-fatal — don't block submission if this fails
       if (profileError) console.warn('Export readiness save failed:', profileError);
 
       // Update auth metadata
       await supabase.auth.updateUser({ data: { role: 'exporter' } });
 
-      if (canSubmitManually) {
-        toast.success('Your documents and bank details have been submitted. Our team will review them within 24 hours.', { duration: 5000 });
-      } else {
-        toast.success("Documents and bank details submitted! We'll verify within 24 hours.");
-      }
-
-      setTimeout(() => { window.location.href = '/dashboard/exporter'; }, 800);
-
+      toast.success("Documents submitted! Our admin team will review and verify your account within 24 hours.");
+      setTimeout(() => {
+        window.location.href = '/dashboard/exporter';
+      }, 800);
     } catch (err: any) {
       console.error('Submission error:', err);
       toast.error(err.message || 'Submission failed.');
@@ -333,10 +299,7 @@ export default function ExporterStep2() {
     }
   };
 
-  const canSubmit =
-    ((cacResult?.verified && ninResult?.verified && cacFile) ||
-      (cacFile && dojahOffline && (!cacResult?.verified || !ninResult?.verified))) &&
-    bankVerified;
+  const canSubmit = cacFile && bankVerified;
 
   const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
 
@@ -344,7 +307,7 @@ export default function ExporterStep2() {
     <div className="min-h-screen bg-[#F2EFE9] py-8 px-4 flex items-center justify-center">
       <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-6 items-stretch">
 
-        {/* ─── LEFT PANEL ─────────────────────────────────────────────────── */}
+        {/* LEFT PANEL */}
         <div
           className="hidden lg:flex lg:w-[44%] flex-col justify-between rounded-3xl p-10 text-white relative overflow-hidden"
           style={{ background: 'linear-gradient(160deg, #002E1A 0%, #004D2E 100%)', fontFamily: 'Barlow, sans-serif' }}
@@ -424,7 +387,7 @@ export default function ExporterStep2() {
           </div>
         </div>
 
-        {/* ─── RIGHT PANEL — FORM ─────────────────────────────────────────── */}
+        {/* RIGHT PANEL — FORM */}
         <div
           className="w-full max-w-lg lg:max-w-none lg:w-[56%] mx-auto lg:mx-0 bg-white rounded-3xl shadow-lg p-8"
           style={{ border: `1px solid ${COLORS.gray200}` }}
@@ -441,66 +404,44 @@ export default function ExporterStep2() {
             Verify Your Business
           </h2>
 
-          {/* ── CAC ── */}
+          {/* ── CAC Number (plain text) ── */}
           <div className="mb-8">
             <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>CAC Number</label>
-            <div className="flex gap-2 mb-2">
-              <div className="relative flex-1">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
-                <input type="text" placeholder="RC123456 or 123456" value={cacInput} onChange={(e) => setCacInput(e.target.value)} className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={cacLoading} />
-              </div>
-              <button onClick={handleCACVerify} disabled={cacLoading || !cacInput.trim()} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
-                {cacLoading ? 'Verifying…' : 'Verify CAC →'}
-              </button>
+            <div className="relative">
+              <Building2 className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
+              <input
+                type="text"
+                placeholder="RC123456 or 123456"
+                value={cacInput}
+                onChange={(e) => setCacInput(e.target.value)}
+                className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm"
+                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+              />
             </div>
-            {import.meta.env.DEV && <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>🧪 Sandbox test: RC1234567</p>}
-            <p className="text-xs" style={{ color: COLORS.gray400 }}>Your Corporate Affairs Commission registration number</p>
-            {cacResult?.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
-                <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-                <p className="font-bold" style={{ color: COLORS.gray800 }}>{cacResult.company_name}</p>
-                <p className="text-sm" style={{ color: '#059669' }}>{cacResult.company_type} · Registered {cacResult.registration_date}</p>
-              </div>
-            )}
-            {cacResult && !cacResult.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
-                <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-                <p className="text-sm text-red-700">{cacResult.error || 'CAC not found'}</p>
-              </div>
-            )}
+            <p className="text-xs mt-2" style={{ color: COLORS.gray400 }}>
+              Your Corporate Affairs Commission registration number. Our admin team will cross-check this manually.
+            </p>
           </div>
 
-          {/* ── NIN ── */}
+          {/* ── NIN Number (plain text, optional) ── */}
           <div className="mb-8">
-            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>NIN Number</label>
-            <div className="flex gap-2 mb-2">
-              <div className="relative flex-1">
-                <input type={showNIN ? 'text' : 'password'} placeholder="11-digit NIN number" value={ninInput} onChange={(e) => setNinInput(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={ninLoading} />
-                <button type="button" onClick={() => setShowNIN(!showNIN)} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }}>
-                  {showNIN ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <button onClick={handleNINVerify} disabled={ninLoading || !ninInput.trim()} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
-                {ninLoading ? 'Verifying…' : 'Verify NIN →'}
+            <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>NIN Number (Optional)</label>
+            <div className="relative">
+              <input
+                type={showNIN ? 'text' : 'password'}
+                placeholder="11-digit NIN number"
+                value={ninInput}
+                onChange={(e) => setNinInput(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm"
+                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+              />
+              <button type="button" onClick={() => setShowNIN(!showNIN)} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }}>
+                {showNIN ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            {import.meta.env.DEV && <p style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>🧪 Sandbox test: 12345678901</p>}
-            <p className="text-xs flex items-center gap-1" style={{ color: COLORS.gray400 }}>
-              <AlertTriangle className="w-3 h-3" /> Your NIN is verified and immediately discarded. Never stored.
+            <p className="text-xs mt-2 flex items-center gap-1" style={{ color: COLORS.gray400 }}>
+              <AlertTriangle className="w-3 h-3" /> Your NIN is stored securely for admin review only.
             </p>
-            {ninResult?.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
-                <CheckCircle2 className="text-green-600 w-5 h-5 mb-2" />
-                <p className="font-bold" style={{ color: COLORS.gray800 }}>Identity Verified</p>
-                <p className="text-sm" style={{ color: '#059669' }}>Your NIN has been verified and discarded.</p>
-              </div>
-            )}
-            {ninResult && !ninResult.verified && (
-              <div className="mt-3 p-4 rounded-xl" style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
-                <AlertTriangle className="text-red-600 w-5 h-5 mb-2" />
-                <p className="text-sm text-red-700">{ninResult.error || 'NIN verification failed'}</p>
-              </div>
-            )}
           </div>
 
           {/* ── Bank Account Details ── */}
@@ -509,14 +450,24 @@ export default function ExporterStep2() {
             <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>We'll send your earnings here after delivery is confirmed.</p>
 
             <div className="mb-3 relative" ref={dropdownRef}>
-              <button type="button" onClick={() => setDropdownOpen(!dropdownOpen)} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
+                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+              >
                 <span className={selectedBankName ? '' : 'text-gray-400'}>{selectedBankName || 'Select your bank'}</span>
                 <ChevronDown size={16} className="text-gray-400" />
               </button>
               {dropdownOpen && (
                 <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto" style={{ borderRadius: 12 }}>
                   {banks.map((bank) => (
-                    <div key={bank.code} onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }} className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`} style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                    <div
+                      key={bank.code}
+                      onClick={() => { setBankCode(bank.code); setDropdownOpen(false); }}
+                      className={`px-4 py-3 text-sm cursor-pointer hover:bg-green-50 transition-colors ${bankCode === bank.code ? 'bg-green-50 font-semibold' : ''}`}
+                      style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                    >
                       {bank.name}
                     </div>
                   ))}
@@ -527,9 +478,24 @@ export default function ExporterStep2() {
             <div className="flex gap-2 mb-2">
               <div className="relative flex-1">
                 <Banknote className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
-                <input type="text" inputMode="numeric" maxLength={10} placeholder="Account number (10 digits)" value={accountNumber} onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))} className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }} disabled={bankLoading} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder="Account number (10 digits)"
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  className="w-full pl-9 pr-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm disabled:opacity-60"
+                  style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+                  disabled={bankLoading}
+                />
               </div>
-              <button onClick={handleBankVerify} disabled={bankLoading || !bankCode || accountNumber.length !== 10} className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50" style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}>
+              <button
+                onClick={handleBankVerify}
+                disabled={bankLoading || !bankCode || accountNumber.length !== 10}
+                className="px-4 py-2 font-semibold text-sm rounded-xl transition disabled:opacity-50"
+                style={{ border: `1px solid ${COLORS.accent}`, color: COLORS.accent, background: 'transparent' }}
+              >
                 {bankLoading ? <Loader2 className="animate-spin w-4 h-4" /> : 'Verify Account →'}
               </button>
             </div>
@@ -548,15 +514,6 @@ export default function ExporterStep2() {
               </div>
             )}
           </div>
-
-          {/* Dojah offline fallback */}
-          {dojahOffline && (
-            <div className="mb-8 p-4 rounded-xl" style={{ background: '#FEF3C7', border: '1px solid #FDE68A', color: '#92400E' }}>
-              <AlertTriangle className="w-5 h-5 mb-2" />
-              <p className="font-semibold text-sm">Automated verification is temporarily unavailable.</p>
-              <p className="text-xs mt-1">Your documents will be reviewed manually by our team within 24 hours. You can still submit now.</p>
-            </div>
-          )}
 
           {/* ─── EXPORT READINESS CHECKLIST ─────────────────────────────── */}
           <div className="mb-8">
@@ -587,7 +544,6 @@ export default function ExporterStep2() {
 
             {readinessExpanded && (
               <div className="mt-3 space-y-3">
-                {/* Progress bar */}
                 <div style={{ height: 6, background: COLORS.gray100, borderRadius: 999, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${(readinessScore / 4) * 100}%`, background: `linear-gradient(90deg, ${COLORS.primary}, #00994D)`, borderRadius: 999, transition: 'width 0.3s' }} />
                 </div>
@@ -624,7 +580,6 @@ export default function ExporterStep2() {
                             {item.linkText}
                           </a>
                         )}
-                        {/* Freight forwarder name input */}
                         {item.key === 'has_freight_forwarder' && readiness.has_freight_forwarder && (
                           <input
                             type="text"

@@ -498,7 +498,6 @@ const COUNTRY_REGISTRY_URLS: Record<string, { registry: string; urls: { label: s
 function getCountryUrls(countryName: string) {
   const direct = COUNTRY_REGISTRY_URLS[countryName];
   if (direct) return direct;
-  // Try fuzzy match
   const key = Object.keys(COUNTRY_REGISTRY_URLS).find(k => countryName.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(countryName.toLowerCase()));
   return key ? COUNTRY_REGISTRY_URLS[key] : null;
 }
@@ -935,7 +934,7 @@ function VerificationsPage({ adminId }: { adminId: string }) {
       .from('verifications')
       .select(`
         id, user_id, status, created_at, updated_at,
-        cac_verified, nin_verified, cac_number, cac_company_name, cac_company_type, cac_registration_date,
+        cac_verified, nin_verified, cac_number, nin_number, cac_company_name, cac_company_type, cac_registration_date,
         admin_notes, reviewed_by, reviewed_at, documents_deleted,
         cac_document_url, nepc_document_url, id_document_url,
         user:users!verifications_user_id_fkey(
@@ -964,17 +963,13 @@ function VerificationsPage({ adminId }: { adminId: string }) {
 
   const getSignedUrl = async (filePath: string): Promise<string | null> => {
     if (!filePath) return null;
-    
-    // If it's already a full public URL (stored from onboarding), use it directly
     if (filePath.startsWith('http')) return filePath;
-    
-    // Otherwise, create a signed URL for the path
     const { data, error } = await supabase.storage
       .from('verifications')
       .createSignedUrl(filePath, 3600);
     if (error) { console.error('Signed URL error:', error); return null; }
     return data?.signedUrl || null;
-};
+  };
 
   const openDocument = async (filePath: string, label: string) => {
     if (!filePath) { toast.error('No document available'); return; }
@@ -1054,7 +1049,6 @@ function VerificationsPage({ adminId }: { adminId: string }) {
       setActionLoading(null);
     }
   };
-
 
   const handleReReview = async (verification: any) => {
     setActionLoading(verification.id);
@@ -1276,8 +1270,6 @@ function VerificationCard({ v, tab, actionLoading, onApprove, onReject, onReRevi
   const isNigerian = country.toLowerCase().includes('nigeria');
   const initials = (v.user?.company_name || v.user?.full_name || '?').slice(0, 2).toUpperCase();
 
-  // Correct document mapping from buyer.tsx
-
   const docs = isNigerian
     ? [
         v.cac_document_url && { label: 'CAC Certificate', path: v.cac_document_url },
@@ -1348,23 +1340,21 @@ function VerificationCard({ v, tab, actionLoading, onApprove, onReject, onReRevi
         </div>
       </div>
 
-      {/* Verification Results */}
+      {/* Verification Results — MANUAL REVIEW VIEW */}
       <div className="px-5 py-4 border-t border-b border-gray-100">
         {isNigerian ? (
-          <div className="flex flex-wrap gap-3">
-            <ResultBadge
-              label="CAC"
-              verified={v.cac_verified}
-              detail={v.cac_company_name}
-            />
-            <ResultBadge
-              label="NIN"
-              verified={v.nin_verified}
-              detail={v.nin_verified ? 'Identity confirmed by NIMC' : undefined}
-            />
-            {!v.cac_verified && !v.nin_verified && (
-              <p className="text-xs text-gray-400 w-full mt-1">Awaiting automated verification results or manual review.</p>
-            )}
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-100">
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">CAC Number</span>
+              <p className="text-sm font-mono text-blue-900 mt-0.5">{v.cac_number || 'Not provided'}</p>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-100">
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">NIN Number</span>
+              <p className="text-sm font-mono text-blue-900 mt-0.5">{v.nin_number || 'Not provided'}</p>
+            </div>
+            <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
+              ⏳ Awaiting manual review
+            </span>
           </div>
         ) : (
           <div className="flex flex-wrap gap-3 items-center">
@@ -1470,26 +1460,6 @@ function VerificationCard({ v, tab, actionLoading, onApprove, onReject, onReRevi
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ResultBadge({ label, verified, detail }: { label: string; verified: boolean; detail?: string }) {
-  return (
-    <div
-      className="flex items-center gap-2 px-3 py-2 rounded-xl"
-      style={{ background: verified ? '#ECFDF5' : '#FEF2F2', border: `1px solid ${verified ? '#A7F3D0' : '#FECACA'}` }}
-    >
-      {verified
-        ? <CheckCircle2 size={14} className="text-green-600 shrink-0" />
-        : <XCircle size={14} className="text-red-400 shrink-0" />
-      }
-      <div className="min-w-0">
-        <span className={`text-xs font-bold block ${verified ? 'text-green-800' : 'text-red-600'}`}>
-          {label} {verified ? 'Verified' : 'Not Verified'}
-        </span>
-        {detail && <p className="text-xs text-green-700 truncate">{detail}</p>}
-      </div>
     </div>
   );
 }
