@@ -322,202 +322,583 @@ function Navbar() {
 /* ============================================================
    HERO
    ============================================================ */
-const HERO_CONTENT = {
-  exporter: {
-    eyebrow: "Nigeria's Trusted Trade Marketplace",
-    heading: (
-      <>Where Nigeria<br /><span style={{ color: "#E8C96A" }}>Trades</span> With<br />The World.</>
-    ),
-    body: (
-      <>Get verified, list your commodities, and reach global buyers through a{" "}
-        <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
-          secure, end-to-end platform
-        </span>{" "}
-        — escrow-protected payments and tracked shipments, every trade.</>
-    ),
-    primaryLabel: "Start Exporting",
-    primaryPath: "/signup?type=exporter",
-    secondaryLabel: "See How It Works",
-    secondaryPath: "/how-it-works",
-    tags: [
-      { icon: CheckCircle, label: "Free to List" },
-      { icon: Lock, label: "Escrow Protected" },
-      { icon: Truck, label: "Real-time Tracking" },
-    ],
+
+const HERO_TRUST_PILLS = [
+  { icon: CheckCircle, label: "Verified profiles" },
+  { icon: Lock, label: "Escrow protected" },
+  { icon: Truck, label: "Tracked shipments" },
+  { icon: Globe, label: "Global buyers" },
+];
+
+const HERO_PROOF_CARDS = [
+  {
+    icon: Building2,
+    title: "Verified onboarding",
+    text: "CAC, ID, and business checks before trade begins.",
   },
-  buyer: {
-    eyebrow: "Source Verified Nigerian Goods",
-    heading: (
-      <>Source Nigerian<br /><span style={{ color: "#E8C96A" }}>Agro‑Goods</span> With<br />Confidence.</>
-    ),
-    body: (
-      <>Browse verified Nigerian exporters and buy commodities through a{" "}
-        <span style={{ color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
-          secure, end-to-end platform
-        </span>{" "}
-        — your payment stays in escrow until you confirm delivery.</>
-    ),
-    primaryLabel: "Find Suppliers",
-    primaryPath: "/signup?type=buyer",
-    secondaryLabel: "See How It Works",
-    secondaryPath: "/how-it-works",
-    tags: [
-      { icon: CheckCircle, label: "Verified Exporters" },
-      { icon: Lock, label: "Escrow Protected" },
-      { icon: Truck, label: "Real-time Tracking" },
-    ],
+  {
+    icon: CreditCard,
+    title: "Secure payment flow",
+    text: "Escrow-first design that protects both sides of the deal.",
   },
-};
+  {
+    icon: Truck,
+    title: "Shipment visibility",
+    text: "Clear movement from pickup, transit, to delivery.",
+  },
+  {
+    icon: BarChart3,
+    title: "Trade readiness",
+    text: "Designed to help exporters look serious from day one.",
+  },
+];
 
 function HeroSection() {
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState(false);
-  const [mode, setMode] = useState<"exporter" | "buyer">("exporter");
+
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 80);
     return () => clearTimeout(t);
   }, []);
-  const content = HERO_CONTENT[mode];
+
   return (
-    <section style={{
-      position: "relative", minHeight: "92vh",
-      display: "flex", flexDirection: "column",
-      background: C.greenDeep, overflow: "hidden",
-      paddingBottom: 56,
-    }}>
-      <div style={{
-        position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
-        backgroundImage: `linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)`,
-        backgroundSize: "80px 80px",
-      }} />
-      <div style={{
-        position: "absolute", top: "-15%", right: "-10%", zIndex: 0, pointerEvents: "none",
-        width: "55vw", height: "55vw", borderRadius: "50%",
-        background: `radial-gradient(circle, rgba(212,168,67,0.10) 0%, transparent 65%)`,
-      }} />
-      <div style={{
-        position: "absolute", bottom: "0", left: "0", zIndex: 0, pointerEvents: "none",
-        width: "40vw", height: "40vw", borderRadius: "50%",
-        background: `radial-gradient(circle, rgba(26,92,65,0.6) 0%, transparent 70%)`,
-      }} />
-      <div style={{ position: "absolute", inset: 0, zIndex: 0, opacity: 0.06 }}>
-        <video autoPlay loop muted playsInline preload="none" poster="/hero-poster.jpg"
-          style={{ width: "100%", height: "100%", objectFit: "cover" }} src="/hero-bg.mp4" />
+    <section
+      style={{
+        position: "relative",
+        minHeight: "94vh",
+        display: "flex",
+        flexDirection: "column",
+        background: C.greenDeep,
+        overflow: "hidden",
+        paddingBottom: 56,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          pointerEvents: "none",
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)",
+          backgroundSize: "80px 80px",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: "-18%",
+          right: "-12%",
+          zIndex: 0,
+          pointerEvents: "none",
+          width: "60vw",
+          height: "60vw",
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(212,168,67,0.12) 0%, transparent 68%)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          bottom: "-18%",
+          left: "-10%",
+          zIndex: 0,
+          pointerEvents: "none",
+          width: "45vw",
+          height: "45vw",
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(26,92,65,0.6) 0%, transparent 72%)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          opacity: 0.05,
+        }}
+      >
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="none"
+          poster="/hero-poster.jpg"
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          src="/hero-bg.mp4"
+        />
       </div>
-      <div style={{
-        position: "relative", zIndex: 10,
-        flex: 1, display: "flex", flexDirection: "column", justifyContent: "center",
-        maxWidth: 1200, margin: "0 auto", padding: "120px 28px 0",
-        width: "100%",
-        opacity: loaded ? 1 : 0,
-        transform: loaded ? "translateY(0)" : "translateY(20px)",
-        transition: "opacity 0.9s ease-out, transform 0.9s cubic-bezier(0.16,1,0.3,1)",
-      }}>
-        <div style={{
-          display: "inline-flex", padding: 4, borderRadius: 10, gap: 4,
-          background: "rgba(255,255,255,0.06)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          alignSelf: "flex-start", marginBottom: 32,
-        }}>
-          {(["exporter", "buyer"] as const).map(tab => (
-            <button key={tab} onClick={() => setMode(tab)} style={{
-              padding: "9px 20px", borderRadius: 7,
-              fontFamily: "'Plus Jakarta Sans', sans-serif",
-              fontSize: 12.5, fontWeight: 700,
-              background: mode === tab ? C.gold : "transparent",
-              color: mode === tab ? C.greenDeep : "rgba(255,255,255,0.65)",
-              border: "none", cursor: "pointer",
-              transition: "all 0.25s ease",
-              display: "flex", alignItems: "center", gap: 7,
-            }}>
-              {tab === "exporter" ? "I'm an Exporter" : "I'm a Buyer"}
-            </button>
-          ))}
-        </div>
-        <div style={{
-          display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 28,
-          padding: "8px 16px", borderRadius: 6,
-          border: `1px solid rgba(212,168,67,0.25)`,
-          background: "rgba(212,168,67,0.06)",
-          alignSelf: "flex-start",
-        }}>
-          <span style={{
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-            fontSize: 10, fontWeight: 800, letterSpacing: "0.22em",
-            textTransform: "uppercase", color: C.gold,
-          }}>{content.eyebrow}</span>
-        </div>
-        <h1 style={{
-          fontFamily: "'Barlow Condensed', sans-serif",
-          fontSize: "clamp(52px, 9.5vw, 110px)",
-          fontWeight: 900, lineHeight: 0.9,
-          letterSpacing: "-0.03em",
-          color: C.white,
-          margin: "0 0 28px",
-          maxWidth: 900,
-        }}>
-          {content.heading}
-        </h1>
-        <p style={{
-          fontFamily: "'Plus Jakarta Sans', sans-serif",
-          fontSize: "clamp(14px, 1.6vw, 18px)",
-          color: "rgba(255,255,255,0.55)",
-          fontWeight: 400, lineHeight: 1.75,
-          maxWidth: 560, margin: "0 0 44px",
-        }}>
-          {content.body}
-        </p>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 48 }}>
-          <button onClick={() => navigate(content.primaryPath)} style={{
-            padding: "15px 32px", borderRadius: 9,
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-            fontSize: 14, fontWeight: 700, color: C.greenDeep,
-            background: C.gold, border: "none", cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 8,
-            transition: "all 0.2s",
-            boxShadow: "0 8px 32px rgba(212,168,67,0.3)",
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#E0B94F"; (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = C.gold; (e.currentTarget as HTMLElement).style.transform = "translateY(0)"; }}>
-            {content.primaryLabel} <ArrowRight size={15} />
-          </button>
-          <button onClick={() => navigate(content.secondaryPath)} style={{
-            padding: "15px 32px", borderRadius: 9,
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-            fontSize: 14, fontWeight: 600, color: C.white,
-            background: "rgba(255,255,255,0.15)",
-            border: "1px solid rgba(255,255,255,0.35)",
-            cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 8,
-            transition: "all 0.2s",
-            backdropFilter: "blur(4px)",
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.25)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.6)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.15)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.35)"; }}>
-            {content.secondaryLabel} <ArrowRight size={15} />
-          </button>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {content.tags.map(({ icon: Icon, label }) => (
-            <div key={label} style={{
-              display: "inline-flex", alignItems: "center", gap: 8,
-              padding: "9px 16px", borderRadius: 7,
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              fontFamily: "'Plus Jakarta Sans', sans-serif",
-              fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.55)",
-            }}>
-              <Icon size={13} style={{ color: C.gold, flexShrink: 0 }} />
-              {label}
+
+      <div
+        style={{
+          position: "relative",
+          zIndex: 10,
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          maxWidth: 1200,
+          margin: "0 auto",
+          padding: "124px 28px 0",
+          width: "100%",
+          opacity: loaded ? 1 : 0,
+          transform: loaded ? "translateY(0)" : "translateY(18px)",
+          transition:
+            "opacity 0.9s ease-out, transform 0.9s cubic-bezier(0.16,1,0.3,1)",
+        }}
+      >
+        <div className="grid w-full items-center gap-10 lg:grid-cols-2">
+          <div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 22,
+                padding: "8px 16px",
+                borderRadius: 999,
+                border: "1px solid rgba(212,168,67,0.25)",
+                background: "rgba(212,168,67,0.06)",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: "0.22em",
+                  textTransform: "uppercase",
+                  color: C.gold,
+                }}
+              >
+                Nigerian trade marketplace
+              </span>
             </div>
-          ))}
+
+            <h1
+              style={{
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontSize: "clamp(52px, 9vw, 112px)",
+                fontWeight: 900,
+                lineHeight: 0.92,
+                letterSpacing: "-0.04em",
+                color: C.white,
+                margin: "0 0 22px",
+                maxWidth: 900,
+              }}
+            >
+              Nigerian goods.
+              <span style={{ display: "block" }}>Global buyers.</span>
+              <span style={{ display: "block", color: C.gold }}>
+                Exported with trust.
+              </span>
+            </h1>
+
+            <p
+              style={{
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                fontSize: "clamp(14px, 1.6vw, 18px)",
+                color: "rgba(255,255,255,0.58)",
+                fontWeight: 400,
+                lineHeight: 1.8,
+                maxWidth: 590,
+                margin: "0 0 34px",
+              }}
+            >
+              IziXport is designed to feel serious from the first screen: verified
+              exporters, secure payments, trade contracts, and logistics tracking — all in
+              one clean, premium experience for phones and desktops.
+            </p>
+
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 30 }}>
+              <button
+                onClick={() => navigate("/signup?type=exporter")}
+                style={{
+                  padding: "15px 32px",
+                  borderRadius: 10,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: C.greenDeep,
+                  background: C.gold,
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "all 0.2s",
+                  boxShadow: "0 10px 34px rgba(212,168,67,0.28)",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = "#E0B94F";
+                  (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background = C.gold;
+                  (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+                }}
+              >
+                Join as Exporter <ArrowRight size={15} />
+              </button>
+
+              <button
+                onClick={() => navigate("/signup?type=buyer")}
+                style={{
+                  padding: "15px 32px",
+                  borderRadius: 10,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: C.white,
+                  background: "rgba(255,255,255,0.12)",
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "all 0.2s",
+                  backdropFilter: "blur(4px)",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.2)";
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "rgba(255,255,255,0.55)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.12)";
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "rgba(255,255,255,0.3)";
+                }}
+              >
+                Join as Buyer <ArrowRight size={15} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                marginBottom: 26,
+              }}
+            >
+              {["Cashew nuts", "Cocoa beans", "Sesame seeds", "Shea butter"].map(
+                (item) => (
+                  <div
+                    key={item}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "9px 14px",
+                      borderRadius: 999,
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "rgba(255,255,255,0.58)",
+                    }}
+                  >
+                    <CheckCircle size={13} style={{ color: C.gold, flexShrink: 0 }} />
+                    {item}
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {HERO_TRUST_PILLS.map(({ icon: Icon, label }) => (
+                <div
+                  key={label}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "14px 16px",
+                    borderRadius: 16,
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 12,
+                      background: "rgba(212,168,67,0.15)",
+                      border: "1px solid rgba(212,168,67,0.22)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Icon size={16} color={C.gold} />
+                  </div>
+                  <div>
+                    <p
+                      style={{
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: C.white,
+                        margin: 0,
+                      }}
+                    >
+                      {label}
+                    </p>
+                    <p
+                      style={{
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        fontSize: 11,
+                        color: "rgba(255,255,255,0.42)",
+                        margin: "3px 0 0",
+                      }}
+                    >
+                      Built for real trade
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ position: "relative", maxWidth: 640, marginLeft: "auto" }}>
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "-20px -14px auto auto",
+                  width: "56%",
+                  height: "56%",
+                  borderRadius: "50%",
+                  background: "radial-gradient(circle, rgba(212,168,67,0.18), transparent 68%)",
+                  pointerEvents: "none",
+                }}
+              />
+              <div
+                style={{
+                  borderRadius: 28,
+                  overflow: "hidden",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  boxShadow: "0 28px 80px rgba(0,0,0,0.2)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
+              >
+                <div style={{ position: "relative", aspectRatio: "16 / 10" }}>
+                  <video
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    preload="none"
+                    poster="/hero-poster.jpg"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    src="/hero-bg.mp4"
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background:
+                        "linear-gradient(180deg, rgba(12,56,37,0.1) 0%, rgba(12,56,37,0.35) 100%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 18,
+                      top: 18,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 12px",
+                      borderRadius: 999,
+                      background: "rgba(255,255,255,0.86)",
+                      color: C.gray700,
+                      boxShadow: "0 10px 26px rgba(0,0,0,0.08)",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    <Star size={12} color={C.goldBright} />
+                    Premium trade story
+                  </div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 18,
+                      bottom: 18,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 12px",
+                      borderRadius: 999,
+                      background: "rgba(12,56,37,0.88)",
+                      color: C.white,
+                      boxShadow: "0 10px 26px rgba(0,0,0,0.16)",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <Award size={12} color={C.gold} />
+                    Built for phones and desktop
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-[1.05fr_0.95fr]">
+                <div
+                  style={{
+                    borderRadius: 24,
+                    overflow: "hidden",
+                    background: C.white,
+                    border: "1px solid rgba(255,255,255,0.75)",
+                    boxShadow: "0 18px 44px rgba(12,56,37,0.08)",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "14px 16px 12px",
+                      borderBottom: "1px solid rgba(230,225,216,0.8)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <p
+                        style={{
+                          fontFamily: "'Plus Jakarta Sans', sans-serif",
+                          fontSize: 11,
+                          fontWeight: 800,
+                          letterSpacing: "0.18em",
+                          textTransform: "uppercase",
+                          color: C.greenBright,
+                          margin: 0,
+                        }}
+                      >
+                        Hero visual
+                      </p>
+                      <p
+                        style={{
+                          fontFamily: "'Plus Jakarta Sans', sans-serif",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: C.gray800,
+                          margin: "4px 0 0",
+                        }}
+                      >
+                        Inspired by your preferred trade collage
+                      </p>
+                    </div>
+                    <div
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 12,
+                        background: C.greenLight,
+                        border: "1px solid rgba(0,107,63,0.15)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: C.greenBright,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Globe size={16} />
+                    </div>
+                  </div>
+                  <img
+                    src="/hero-cashew-collage.png"
+                    alt="Trade collage inspired hero visual"
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      height: 230,
+                      objectFit: "cover",
+                      background: "#f5f2ea",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 12 }}>
+                  {HERO_PROOF_CARDS.map((card) => {
+                    const Icon = card.icon;
+                    return (
+                      <div
+                        key={card.title}
+                        style={{
+                          borderRadius: 22,
+                          background: "rgba(255,255,255,0.07)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          padding: 16,
+                          display: "flex",
+                          gap: 14,
+                          alignItems: "flex-start",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: 14,
+                            background: "rgba(212,168,67,0.14)",
+                            border: "1px solid rgba(212,168,67,0.22)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: C.gold,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Icon size={18} />
+                        </div>
+                        <div>
+                          <h3
+                            style={{
+                              fontFamily: "'Plus Jakarta Sans', sans-serif",
+                              fontSize: 14,
+                              fontWeight: 800,
+                              color: C.white,
+                              margin: "0 0 5px",
+                            }}
+                          >
+                            {card.title}
+                          </h3>
+                          <p
+                            style={{
+                              fontFamily: "'Plus Jakarta Sans', sans-serif",
+                              fontSize: 12.5,
+                              lineHeight: 1.7,
+                              color: "rgba(255,255,255,0.52)",
+                              margin: 0,
+                            }}
+                          >
+                            {card.text}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
   );
 }
-
-
 /* ============================================================
    HOW IT WORKS
    ============================================================ */
