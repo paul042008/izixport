@@ -3,13 +3,14 @@
 // Exporter uploads documents + enters CAC/NIN as plain text
 // Admin reviews manually within 24 hours
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase/client';
 import {
   Building2, Eye, EyeOff, Upload, CheckCircle2,
   AlertTriangle, Banknote, Loader2, ChevronDown,
   Check, Lock, ShieldCheck, Globe, ClipboardCheck,
+  X, FileImage, FileText as FileTextIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -101,7 +102,10 @@ const READINESS_ITEMS: ReadinessItem[] = [
 
 export default function ExporterStep2() {
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── FILE INPUT REFS ─────────────────────────────────────────────────────
+  const cacFileInputRef = useRef<HTMLInputElement>(null);
+  const nepcFileInputRef = useRef<HTMLInputElement>(null);
 
   // CAC — plain text only, stored for admin review
   const [cacInput, setCacInput] = useState('');
@@ -112,7 +116,9 @@ export default function ExporterStep2() {
 
   // Documents
   const [cacFile, setCacFile] = useState<File | null>(null);
+  const [cacPreview, setCacPreview] = useState<string | null>(null);
   const [nepcFile, setNepcFile] = useState<File | null>(null);
+  const [nepcPreview, setNepcPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Bank details
@@ -143,6 +149,15 @@ export default function ExporterStep2() {
     setReadiness((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // ─── MEMORY CLEANUP ──────────────────────────────────────────────────────
+  // Revoke object URLs on unmount to prevent memory leaks on low-end devices
+  useEffect(() => {
+    return () => {
+      if (cacPreview) URL.revokeObjectURL(cacPreview);
+      if (nepcPreview) URL.revokeObjectURL(nepcPreview);
+    };
+  }, [cacPreview, nepcPreview]);
+
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -159,6 +174,64 @@ export default function ExporterStep2() {
     setAccountName('');
     setBankError('');
   }, [bankCode, accountNumber]);
+
+  // ─── FILE HANDLING ───────────────────────────────────────────────────────
+  const handleFileSelect = useCallback((type: 'cac' | 'nepc', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File must be under 5MB');
+      // Reset the input so user can try again
+      e.target.value = '';
+      return;
+    }
+
+    // Check file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Please upload a PDF, JPG, PNG, or WebP file');
+      e.target.value = '';
+      return;
+    }
+
+    if (type === 'cac') {
+      // Clean up old preview to save memory
+      if (cacPreview) URL.revokeObjectURL(cacPreview);
+      setCacFile(file);
+      // Only create preview for images (not PDFs — saves memory)
+      if (file.type.startsWith('image/')) {
+        setCacPreview(URL.createObjectURL(file));
+      } else {
+        setCacPreview(null);
+      }
+    } else {
+      if (nepcPreview) URL.revokeObjectURL(nepcPreview);
+      setNepcFile(file);
+      if (file.type.startsWith('image/')) {
+        setNepcPreview(URL.createObjectURL(file));
+      } else {
+        setNepcPreview(null);
+      }
+    }
+
+    toast.success(`${file.name} selected (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
+  }, [cacPreview, nepcPreview]);
+
+  const removeFile = useCallback((type: 'cac' | 'nepc') => {
+    if (type === 'cac') {
+      if (cacPreview) URL.revokeObjectURL(cacPreview);
+      setCacFile(null);
+      setCacPreview(null);
+      if (cacFileInputRef.current) cacFileInputRef.current.value = '';
+    } else {
+      if (nepcPreview) URL.revokeObjectURL(nepcPreview);
+      setNepcFile(null);
+      setNepcPreview(null);
+      if (nepcFileInputRef.current) nepcFileInputRef.current.value = '';
+    }
+  }, [cacPreview, nepcPreview]);
 
   const handleBankVerify = async () => {
     if (!bankCode || !accountNumber) {
@@ -185,17 +258,6 @@ export default function ExporterStep2() {
     } finally {
       setBankLoading(false);
     }
-  };
-
-  const handleFileSelect = (type: 'cac' | 'nepc', e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File must be under 5MB');
-      return;
-    }
-    if (type === 'cac') setCacFile(file);
-    else setNepcFile(file);
   };
 
   const uploadFile = async (file: File, userId: string, prefix: string) => {
@@ -287,6 +349,10 @@ export default function ExporterStep2() {
       // Update auth metadata
       await supabase.auth.updateUser({ data: { role: 'exporter' } });
 
+      // Clean up previews to free memory before navigation
+      if (cacPreview) URL.revokeObjectURL(cacPreview);
+      if (nepcPreview) URL.revokeObjectURL(nepcPreview);
+
       toast.success("Documents submitted! Our admin team will review and verify your account within 24 hours.");
       setTimeout(() => {
         window.location.href = '/dashboard/exporter';
@@ -300,11 +366,129 @@ export default function ExporterStep2() {
   };
 
   const canSubmit = cacFile && bankVerified;
-
   const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
 
+  // ─── FILE UPLOAD COMPONENT ───────────────────────────────────────────────
+  const FileUploadBox = ({
+    label,
+    required,
+    file,
+    preview,
+    onSelect,
+    onRemove,
+    inputRef,
+    accent = false,
+  }: {
+    label: string;
+    required?: boolean;
+    file: File | null;
+    preview: string | null;
+    onSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onRemove: () => void;
+    inputRef: React.RefObject<HTMLInputElement | null>;
+    accent?: boolean;
+  }) => (
+    <div
+      className={`border-2 border-dashed rounded-xl p-5 text-center transition-all ${
+        file ? 'bg-green-50/50 border-green-300' : 'hover:bg-gray-50'
+      }`}
+      style={{ borderColor: file ? '#86EFAC' : accent ? COLORS.accent : COLORS.gray200 }}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        capture="environment"
+        className="hidden"
+        onChange={onSelect}
+      />
+
+      {!file ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="w-full flex flex-col items-center gap-2 py-2"
+        >
+          <div
+            className="w-12 h-12 rounded-full flex items-center justify-center mb-1"
+            style={{ background: accent ? `${COLORS.accent}15` : COLORS.gray100 }}
+          >
+            <Upload size={22} style={{ color: accent ? COLORS.accent : COLORS.gray400 }} />
+          </div>
+          <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>
+            {label} {required && <span style={{ color: '#EF4444' }}>*</span>}
+          </p>
+          <p className="text-xs" style={{ color: COLORS.gray400 }}>
+            Tap to upload PDF or photo · Max 5MB
+          </p>
+        </button>
+      ) : (
+        <div className="w-full">
+          {/* Preview for images */}
+          {preview && (
+            <div className="mb-3 relative">
+              <img
+                src={preview}
+                alt="Preview"
+                className="w-full h-32 object-cover rounded-lg"
+                loading="lazy"
+              />
+              <button
+                type="button"
+                onClick={onRemove}
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* File info */}
+          <div className="flex items-center gap-3 text-left">
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: COLORS.primaryLight }}
+            >
+              {file.type === 'application/pdf' ? (
+                <FileTextIcon size={18} style={{ color: COLORS.primary }} />
+              ) : (
+                <FileImage size={18} style={{ color: COLORS.primary }} />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate" style={{ color: COLORS.gray800 }}>
+                {file.name}
+              </p>
+              <p className="text-xs" style={{ color: COLORS.gray400 }}>
+                {(file.size / 1024).toFixed(0)} KB · {file.type.split('/')[1].toUpperCase()}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-red-50 transition"
+              style={{ color: '#EF4444' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Change file button */}
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="mt-3 text-xs font-semibold"
+            style={{ color: COLORS.accent }}
+          >
+            Change file
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-[#F2EFE9] py-8 px-4 flex items-center justify-center">
+    <div className="min-h-screen bg-[#F2EFE9] py-6 px-4 flex items-center justify-center">
       <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-6 items-stretch">
 
         {/* LEFT PANEL */}
@@ -389,23 +573,23 @@ export default function ExporterStep2() {
 
         {/* RIGHT PANEL — FORM */}
         <div
-          className="w-full max-w-lg lg:max-w-none lg:w-[56%] mx-auto lg:mx-0 bg-white rounded-3xl shadow-lg p-8"
+          className="w-full max-w-lg lg:max-w-none lg:w-[56%] mx-auto lg:mx-0 bg-white rounded-3xl shadow-lg p-6 sm:p-8"
           style={{ border: `1px solid ${COLORS.gray200}` }}
         >
           {/* Progress bar */}
-          <div className="flex mb-8">
+          <div className="flex mb-6">
             <div className="flex-1">
               <div className="h-2 rounded-full" style={{ background: COLORS.accent }} />
               <p className="text-xs mt-2 font-medium" style={{ color: COLORS.accent }}>Step 2 of 2</p>
             </div>
           </div>
 
-          <h2 className="text-3xl font-black mb-6" style={{ fontFamily: 'Barlow Condensed, sans-serif', color: COLORS.gray900 }}>
+          <h2 className="text-2xl sm:text-3xl font-black mb-6" style={{ fontFamily: 'Barlow Condensed, sans-serif', color: COLORS.gray900 }}>
             Verify Your Business
           </h2>
 
           {/* ── CAC Number (plain text) ── */}
-          <div className="mb-8">
+          <div className="mb-6">
             <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>CAC Number</label>
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.gray400 }} size={16} />
@@ -424,7 +608,7 @@ export default function ExporterStep2() {
           </div>
 
           {/* ── NIN Number (plain text, optional) ── */}
-          <div className="mb-8">
+          <div className="mb-6">
             <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>NIN Number (Optional)</label>
             <div className="relative">
               <input
@@ -445,9 +629,9 @@ export default function ExporterStep2() {
           </div>
 
           {/* ── Bank Account Details ── */}
-          <div className="mb-8">
+          <div className="mb-6">
             <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>Bank Account for Escrow Payouts</label>
-            <p className="text-xs mb-4" style={{ color: COLORS.gray400 }}>We'll send your earnings here after delivery is confirmed.</p>
+            <p className="text-xs mb-3" style={{ color: COLORS.gray400 }}>We'll send your earnings here after delivery is confirmed.</p>
 
             <div className="mb-3 relative" ref={dropdownRef}>
               <button
@@ -516,7 +700,7 @@ export default function ExporterStep2() {
           </div>
 
           {/* ─── EXPORT READINESS CHECKLIST ─────────────────────────────── */}
-          <div className="mb-8">
+          <div className="mb-6">
             <div
               onClick={() => setReadinessExpanded(!readinessExpanded)}
               className="flex items-center justify-between cursor-pointer p-4 rounded-xl"
@@ -609,35 +793,37 @@ export default function ExporterStep2() {
             )}
           </div>
 
-          {/* Documents */}
-          <div className="mb-8">
+          {/* ─── DOCUMENTS ───────────────────────────────────────────────── */}
+          <div className="mb-6">
             <label className="text-xs font-bold uppercase tracking-wider mb-2 block" style={{ color: COLORS.accent }}>Supporting Documents</label>
-            <div className="p-4 rounded-xl mb-4 text-xs" style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1E40AF' }}>
+            <div className="p-3 rounded-xl mb-3 text-xs" style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1E40AF' }}>
               Our team visually reviews your CAC certificate to confirm authenticity. Documents are permanently deleted within 24 hours of review.
             </div>
 
-            <div className="border-2 border-dashed rounded-xl p-6 text-center mb-4 relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.accent }} onClick={() => fileInputRef.current?.click()}>
-              <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.accent }} />
-              <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>CAC Certificate (Required)</p>
-              <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
-              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('cac', e)} />
-              {cacFile && (
-                <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
-                  <CheckCircle2 className="w-3 h-3" /> {cacFile.name}
-                </div>
-              )}
+            {/* CAC Certificate */}
+            <div className="mb-3">
+              <FileUploadBox
+                label="CAC Certificate"
+                required
+                file={cacFile}
+                preview={cacPreview}
+                onSelect={(e) => handleFileSelect('cac', e)}
+                onRemove={() => removeFile('cac')}
+                inputRef={cacFileInputRef}
+                accent
+              />
             </div>
 
-            <div className="border-2 border-dashed rounded-xl p-6 text-center relative cursor-pointer transition-all hover:bg-gray-50" style={{ borderColor: COLORS.gray200 }}>
-              <Upload className="mx-auto mb-2" size={24} style={{ color: COLORS.gray400 }} />
-              <p className="font-bold text-sm" style={{ color: COLORS.gray800 }}>NEPC Registration (Optional)</p>
-              <p className="text-xs" style={{ color: COLORS.gray400 }}>PDF or image · Max 5MB</p>
-              <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileSelect('nepc', e)} />
-              {nepcFile && (
-                <div className="mt-2 flex items-center justify-center gap-1 text-xs" style={{ color: '#059669' }}>
-                  <CheckCircle2 className="w-3 h-3" /> {nepcFile.name}
-                </div>
-              )}
+            {/* NEPC Certificate */}
+            <div>
+              <FileUploadBox
+                label="NEPC Registration"
+                file={nepcFile}
+                preview={nepcPreview}
+                onSelect={(e) => handleFileSelect('nepc', e)}
+                onRemove={() => removeFile('nepc')}
+                inputRef={nepcFileInputRef}
+              />
             </div>
           </div>
 

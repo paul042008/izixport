@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Shield, Lock, Truck, CheckCircle, Globe, ArrowRight, Menu,
   BarChart3, Users, TrendingUp, Building2, X, Mail, Heart,
   MapPin, Linkedin, Github, Check, CreditCard, Zap, Star,
   Award, Twitter, Instagram, Loader2,
-  FileText, Headphones, Beaker,
+  FileText, Headphones, Beaker, ChevronLeft, ChevronRight,
 } from "lucide-react";
 
 import Testimonials from "../components/Testimonials";
@@ -320,60 +320,85 @@ function Navbar() {
 }
 
 /* ============================================================
-   HERO
+   HERO — Auto-Sliding Image Carousel
    ============================================================ */
 
-const HERO_TRUST_PILLS = [
-  { icon: CheckCircle, label: "Verified profiles" },
-  { icon: Lock, label: "Escrow protected" },
-  { icon: Truck, label: "Tracked shipments" },
-  { icon: Globe, label: "Global buyers" },
-];
-
-const HERO_PROOF_CARDS = [
-  {
-    icon: Building2,
-    title: "Verified onboarding",
-    text: "CAC, ID, and business checks before trade begins.",
-  },
-  {
-    icon: CreditCard,
-    title: "Secure payment flow",
-    text: "Escrow-first design that protects both sides of the deal.",
-  },
-  {
-    icon: Truck,
-    title: "Shipment visibility",
-    text: "Clear movement from pickup, transit, to delivery.",
-  },
-  {
-    icon: BarChart3,
-    title: "Trade readiness",
-    text: "Designed to help exporters look serious from day one.",
-  },
+const HERO_SLIDES = [
+  { src: "/hero-slide-1.png", alt: "From Nigerian farms to global markets" },
+  { src: "/hero-slide-2.png", alt: "Premium cocoa exports worldwide" },
+  { src: "/hero-slide-3.png", alt: "Nigerian agro commodities" },
 ];
 
 function HeroSection() {
   const navigate = useNavigate();
   const [loaded, setLoaded] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 80);
     return () => clearTimeout(t);
   }, []);
 
+  const goToSlide = useCallback((index: number) => {
+    if (isTransitioning) return;
+    setIsTransitioning(true);
+    setCurrentSlide(index);
+    setTimeout(() => setIsTransitioning(false), 600);
+  }, [isTransitioning]);
+
+  const nextSlide = useCallback(() => {
+    goToSlide((currentSlide + 1) % HERO_SLIDES.length);
+  }, [currentSlide, goToSlide]);
+
+  const prevSlide = useCallback(() => {
+    goToSlide((currentSlide - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+  }, [currentSlide, goToSlide]);
+
+  useEffect(() => {
+    autoPlayRef.current = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+    }, 5000);
+    return () => {
+      if (autoPlayRef.current) clearInterval(autoPlayRef.current);
+    };
+  }, []);
+
+  const resetAutoPlay = useCallback(() => {
+    if (autoPlayRef.current) clearInterval(autoPlayRef.current);
+    autoPlayRef.current = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+    }, 5000);
+  }, []);
+
+  const handlePrev = () => {
+    prevSlide();
+    resetAutoPlay();
+  };
+
+  const handleNext = () => {
+    nextSlide();
+    resetAutoPlay();
+  };
+
+  const handleDotClick = (index: number) => {
+    goToSlide(index);
+    resetAutoPlay();
+  };
+
   return (
     <section
       style={{
         position: "relative",
-        minHeight: "94vh",
+        minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
         background: C.greenDeep,
         overflow: "hidden",
-        paddingBottom: 56,
       }}
     >
+      {/* Subtle grid pattern */}
       <div
         style={{
           position: "absolute",
@@ -381,42 +406,50 @@ function HeroSection() {
           zIndex: 0,
           pointerEvents: "none",
           backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px)",
+            "linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)",
           backgroundSize: "80px 80px",
         }}
       />
+
+      {/* Gold glow top-right */}
       <div
         style={{
           position: "absolute",
-          top: "-18%",
+          top: "-22%",
           right: "-12%",
           zIndex: 0,
           pointerEvents: "none",
-          width: "60vw",
-          height: "60vw",
+          width: "55vw",
+          height: "55vw",
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(212,168,67,0.12) 0%, transparent 68%)",
+          background:
+            "radial-gradient(circle, rgba(212,168,67,0.10) 0%, transparent 65%)",
         }}
       />
+
+      {/* Green glow bottom-left */}
       <div
         style={{
           position: "absolute",
-          bottom: "-18%",
+          bottom: "-28%",
           left: "-10%",
           zIndex: 0,
           pointerEvents: "none",
-          width: "45vw",
-          height: "45vw",
+          width: "42vw",
+          height: "42vw",
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(26,92,65,0.6) 0%, transparent 72%)",
+          background:
+            "radial-gradient(circle, rgba(26,92,65,0.5) 0%, transparent 70%)",
         }}
       />
+
+      {/* Faded background video */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           zIndex: 0,
-          opacity: 0.05,
+          opacity: 0.04,
         }}
       >
         <video
@@ -440,22 +473,23 @@ function HeroSection() {
           alignItems: "center",
           maxWidth: 1200,
           margin: "0 auto",
-          padding: "124px 28px 0",
+          padding: "140px 28px 100px",
           width: "100%",
           opacity: loaded ? 1 : 0,
-          transform: loaded ? "translateY(0)" : "translateY(18px)",
+          transform: loaded ? "translateY(0)" : "translateY(20px)",
           transition:
-            "opacity 0.9s ease-out, transform 0.9s cubic-bezier(0.16,1,0.3,1)",
+            "opacity 1s ease-out, transform 1s cubic-bezier(0.16,1,0.3,1)",
         }}
       >
-        <div className="grid w-full items-center gap-10 lg:grid-cols-2">
+        <div className="grid w-full items-center gap-14 lg:grid-cols-2">
+          {/* LEFT: Text Content */}
           <div>
             <div
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 10,
-                marginBottom: 22,
+                marginBottom: 24,
                 padding: "8px 16px",
                 borderRadius: 999,
                 border: "1px solid rgba(212,168,67,0.25)",
@@ -472,19 +506,19 @@ function HeroSection() {
                   color: C.gold,
                 }}
               >
-                Nigerian trade marketplace
+                Nigerian Trade Marketplace
               </span>
             </div>
 
             <h1
               style={{
                 fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: "clamp(52px, 9vw, 112px)",
+                fontSize: "clamp(48px, 8vw, 104px)",
                 fontWeight: 900,
-                lineHeight: 0.92,
+                lineHeight: 0.95,
                 letterSpacing: "-0.04em",
                 color: C.white,
-                margin: "0 0 22px",
+                margin: "0 0 24px",
                 maxWidth: 900,
               }}
             >
@@ -498,24 +532,31 @@ function HeroSection() {
             <p
               style={{
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
-                fontSize: "clamp(14px, 1.6vw, 18px)",
-                color: "rgba(255,255,255,0.58)",
+                fontSize: "clamp(14px, 1.5vw, 17px)",
+                color: "rgba(255,255,255,0.55)",
                 fontWeight: 400,
                 lineHeight: 1.8,
-                maxWidth: 590,
-                margin: "0 0 34px",
+                maxWidth: 520,
+                margin: "0 0 36px",
               }}
             >
-              IziXport is designed to feel serious from the first screen: verified
-              exporters, secure payments, trade contracts, and logistics tracking — all in
-              one clean, premium experience for phones and desktops.
+              IziXport connects verified Nigerian exporters with global buyers
+              through secure escrow payments, real-time tracking, and end-to-end
+              trade support.
             </p>
 
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 30 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 14,
+                flexWrap: "wrap",
+                marginBottom: 40,
+              }}
+            >
               <button
                 onClick={() => navigate("/signup?type=exporter")}
                 style={{
-                  padding: "15px 32px",
+                  padding: "15px 28px",
                   borderRadius: 10,
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 14,
@@ -531,12 +572,15 @@ function HeroSection() {
                   boxShadow: "0 10px 34px rgba(212,168,67,0.28)",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = "#E0B94F";
-                  (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)";
+                  (e.currentTarget as HTMLElement).style.background =
+                    "#E0B94F";
+                  (e.currentTarget as HTMLElement).style.transform =
+                    "translateY(-2px)";
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.background = C.gold;
-                  (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+                  (e.currentTarget as HTMLElement).style.transform =
+                    "translateY(0)";
                 }}
               >
                 Join as Exporter <ArrowRight size={15} />
@@ -545,14 +589,14 @@ function HeroSection() {
               <button
                 onClick={() => navigate("/signup?type=buyer")}
                 style={{
-                  padding: "15px 32px",
+                  padding: "15px 28px",
                   borderRadius: 10,
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 14,
                   fontWeight: 600,
                   color: C.white,
-                  background: "rgba(255,255,255,0.12)",
-                  border: "1px solid rgba(255,255,255,0.3)",
+                  background: "rgba(255,255,255,0.10)",
+                  border: "1px solid rgba(255,255,255,0.25)",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -562,15 +606,15 @@ function HeroSection() {
                 }}
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLElement).style.background =
-                    "rgba(255,255,255,0.2)";
+                    "rgba(255,255,255,0.18)";
                   (e.currentTarget as HTMLElement).style.borderColor =
-                    "rgba(255,255,255,0.55)";
+                    "rgba(255,255,255,0.45)";
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.background =
-                    "rgba(255,255,255,0.12)";
+                    "rgba(255,255,255,0.10)";
                   (e.currentTarget as HTMLElement).style.borderColor =
-                    "rgba(255,255,255,0.3)";
+                    "rgba(255,255,255,0.25)";
                 }}
               >
                 Join as Buyer <ArrowRight size={15} />
@@ -582,7 +626,6 @@ function HeroSection() {
                 display: "flex",
                 gap: 10,
                 flexWrap: "wrap",
-                marginBottom: 26,
               }}
             >
               {["Cashew nuts", "Cocoa beans", "Sesame seeds", "Shea butter"].map(
@@ -600,296 +643,290 @@ function HeroSection() {
                       fontFamily: "'Plus Jakarta Sans', sans-serif",
                       fontSize: 12,
                       fontWeight: 600,
-                      color: "rgba(255,255,255,0.58)",
+                      color: "rgba(255,255,255,0.55)",
                     }}
                   >
-                    <CheckCircle size={13} style={{ color: C.gold, flexShrink: 0 }} />
+                    <CheckCircle
+                      size={13}
+                      style={{ color: C.gold, flexShrink: 0 }}
+                    />
                     {item}
                   </div>
                 )
               )}
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {HERO_TRUST_PILLS.map(({ icon: Icon, label }) => (
-                <div
-                  key={label}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "14px 16px",
-                    borderRadius: 16,
-                    background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 12,
-                      background: "rgba(212,168,67,0.15)",
-                      border: "1px solid rgba(212,168,67,0.22)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Icon size={16} color={C.gold} />
-                  </div>
-                  <div>
-                    <p
-                      style={{
-                        fontFamily: "'Plus Jakarta Sans', sans-serif",
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: C.white,
-                        margin: 0,
-                      }}
-                    >
-                      {label}
-                    </p>
-                    <p
-                      style={{
-                        fontFamily: "'Plus Jakarta Sans', sans-serif",
-                        fontSize: 11,
-                        color: "rgba(255,255,255,0.42)",
-                        margin: "3px 0 0",
-                      }}
-                    >
-                      Built for real trade
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
 
-          <div>
-            <div style={{ position: "relative", maxWidth: 640, marginLeft: "auto" }}>
+          {/* RIGHT: Auto-sliding Image Carousel */}
+          <div style={{ position: "relative" }}>
+            {/* Main carousel frame */}
+            <div
+              style={{
+                borderRadius: 24,
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.08)",
+                boxShadow: "0 32px 80px rgba(0,0,0,0.25)",
+                background: C.greenDeep,
+                position: "relative",
+                aspectRatio: "4 / 3",
+              }}
+            >
+              {/* Slides container */}
+              <div
+                style={{
+                  display: "flex",
+                  height: "100%",
+                  transition: "transform 0.6s cubic-bezier(0.16,1,0.3,1)",
+                  transform: `translateX(-${currentSlide * 100}%)`,
+                }}
+              >
+                {HERO_SLIDES.map((slide, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      minWidth: "100%",
+                      height: "100%",
+                      position: "relative",
+                    }}
+                  >
+                    <img
+                      src={slide.src}
+                      alt={slide.alt}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background:
+                          "linear-gradient(180deg, rgba(12,56,37,0.05) 0%, rgba(12,56,37,0.35) 100%)",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Navigation arrows */}
+              <button
+                onClick={handlePrev}
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.15)",
+                  backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: C.white,
+                  transition: "all 0.2s",
+                  zIndex: 10,
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.25)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.15)";
+                }}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                onClick={handleNext}
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.15)",
+                  backdropFilter: "blur(8px)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  color: C.white,
+                  transition: "all 0.2s",
+                  zIndex: 10,
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.25)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.background =
+                    "rgba(255,255,255,0.15)";
+                }}
+              >
+                <ChevronRight size={18} />
+              </button>
+
+              {/* Dot indicators */}
               <div
                 style={{
                   position: "absolute",
-                  inset: "-20px -14px auto auto",
-                  width: "56%",
-                  height: "56%",
-                  borderRadius: "50%",
-                  background: "radial-gradient(circle, rgba(212,168,67,0.18), transparent 68%)",
-                  pointerEvents: "none",
-                }}
-              />
-              <div
-                style={{
-                  borderRadius: 28,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  boxShadow: "0 28px 80px rgba(0,0,0,0.2)",
-                  background: "rgba(255,255,255,0.03)",
+                  bottom: 16,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  display: "flex",
+                  gap: 8,
+                  zIndex: 10,
                 }}
               >
-                <div style={{ position: "relative", aspectRatio: "16 / 10" }}>
-                  <video
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    preload="none"
-                    poster="/hero-poster.jpg"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    src="/hero-bg.mp4"
-                  />
-                  <div
+                {HERO_SLIDES.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => handleDotClick(index)}
                     style={{
-                      position: "absolute",
-                      inset: 0,
+                      width: currentSlide === index ? 24 : 8,
+                      height: 8,
+                      borderRadius: 4,
                       background:
-                        "linear-gradient(180deg, rgba(12,56,37,0.1) 0%, rgba(12,56,37,0.35) 100%)",
-                      pointerEvents: "none",
+                        currentSlide === index
+                          ? C.gold
+                          : "rgba(255,255,255,0.35)",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "all 0.3s ease",
                     }}
                   />
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 18,
-                      top: 18,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "8px 12px",
-                      borderRadius: 999,
-                      background: "rgba(255,255,255,0.86)",
-                      color: C.gray700,
-                      boxShadow: "0 10px 26px rgba(0,0,0,0.08)",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    <Star size={12} color={C.goldBright} />
-                    Premium trade story
-                  </div>
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: 18,
-                      bottom: 18,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "8px 12px",
-                      borderRadius: 999,
-                      background: "rgba(12,56,37,0.88)",
-                      color: C.white,
-                      boxShadow: "0 10px 26px rgba(0,0,0,0.16)",
-                      fontFamily: "'Plus Jakarta Sans', sans-serif",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    <Award size={12} color={C.gold} />
-                    Built for phones and desktop
-                  </div>
-                </div>
+                ))}
               </div>
+            </div>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-[1.05fr_0.95fr]">
+            {/* Floating stat card — top right */}
+            <div
+              className="lp-float"
+              style={{
+                position: "absolute",
+                top: -18,
+                right: -14,
+                padding: "14px 18px",
+                borderRadius: 14,
+                background: "rgba(255,255,255,0.96)",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(255,255,255,0.6)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.14)",
+                zIndex: 20,
+              }}
+            >
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
+              >
                 <div
                   style={{
-                    borderRadius: 24,
-                    overflow: "hidden",
-                    background: C.white,
-                    border: "1px solid rgba(255,255,255,0.75)",
-                    boxShadow: "0 18px 44px rgba(12,56,37,0.08)",
+                    width: 36,
+                    height: 36,
+                    borderRadius: 9,
+                    background: C.goldLight,
+                    border: `1px solid rgba(212,168,67,0.18)`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
-                  <div
+                  <Globe size={16} color={C.gold} />
+                </div>
+                <div>
+                  <p
                     style={{
-                      padding: "14px 16px 12px",
-                      borderBottom: "1px solid rgba(230,225,216,0.8)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: C.gray900,
+                      margin: "0 0 1px",
+                      lineHeight: 1,
                     }}
                   >
-                    <div>
-                      <p
-                        style={{
-                          fontFamily: "'Plus Jakarta Sans', sans-serif",
-                          fontSize: 11,
-                          fontWeight: 800,
-                          letterSpacing: "0.18em",
-                          textTransform: "uppercase",
-                          color: C.greenBright,
-                          margin: 0,
-                        }}
-                      >
-                        Hero visual
-                      </p>
-                      <p
-                        style={{
-                          fontFamily: "'Plus Jakarta Sans', sans-serif",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: C.gray800,
-                          margin: "4px 0 0",
-                        }}
-                      >
-                        Inspired by your preferred trade collage
-                      </p>
-                    </div>
-                    <div
-                      style={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: 12,
-                        background: C.greenLight,
-                        border: "1px solid rgba(0,107,63,0.15)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: C.greenBright,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Globe size={16} />
-                    </div>
-                  </div>
-                  <img
-                    src="/hero-cashew-collage.png"
-                    alt="Trade collage inspired hero visual"
+                    50+ Countries
+                  </p>
+                  <p
                     style={{
-                      display: "block",
-                      width: "100%",
-                      height: 230,
-                      objectFit: "cover",
-                      background: "#f5f2ea",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 10,
+                      color: C.gray500,
+                      margin: 0,
                     }}
-                  />
+                  >
+                    Global buyer network
+                  </p>
                 </div>
+              </div>
+            </div>
 
-                <div style={{ display: "grid", gap: 12 }}>
-                  {HERO_PROOF_CARDS.map((card) => {
-                    const Icon = card.icon;
-                    return (
-                      <div
-                        key={card.title}
-                        style={{
-                          borderRadius: 22,
-                          background: "rgba(255,255,255,0.07)",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                          padding: 16,
-                          display: "flex",
-                          gap: 14,
-                          alignItems: "flex-start",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 42,
-                            height: 42,
-                            borderRadius: 14,
-                            background: "rgba(212,168,67,0.14)",
-                            border: "1px solid rgba(212,168,67,0.22)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: C.gold,
-                            flexShrink: 0,
-                          }}
-                        >
-                          <Icon size={18} />
-                        </div>
-                        <div>
-                          <h3
-                            style={{
-                              fontFamily: "'Plus Jakarta Sans', sans-serif",
-                              fontSize: 14,
-                              fontWeight: 800,
-                              color: C.white,
-                              margin: "0 0 5px",
-                            }}
-                          >
-                            {card.title}
-                          </h3>
-                          <p
-                            style={{
-                              fontFamily: "'Plus Jakarta Sans', sans-serif",
-                              fontSize: 12.5,
-                              lineHeight: 1.7,
-                              color: "rgba(255,255,255,0.52)",
-                              margin: 0,
-                            }}
-                          >
-                            {card.text}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+            {/* Floating stat card — bottom left */}
+            <div
+              className="lp-float-delayed"
+              style={{
+                position: "absolute",
+                bottom: 20,
+                left: -18,
+                padding: "14px 18px",
+                borderRadius: 14,
+                background: "rgba(12,56,37,0.94)",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+                zIndex: 20,
+              }}
+            >
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 10 }}
+              >
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 9,
+                    background: "rgba(212,168,67,0.15)",
+                    border: `1px solid rgba(212,168,67,0.25)`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Shield size={16} color={C.gold} />
+                </div>
+                <div>
+                  <p
+                    style={{
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: C.white,
+                      margin: "0 0 1px",
+                      lineHeight: 1,
+                    }}
+                  >
+                    100% Escrow
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
+                      fontSize: 10,
+                      color: "rgba(255,255,255,0.5)",
+                      margin: 0,
+                    }}
+                  >
+                    Secure transactions
+                  </p>
                 </div>
               </div>
             </div>
@@ -899,6 +936,7 @@ function HeroSection() {
     </section>
   );
 }
+
 /* ============================================================
    HOW IT WORKS
    ============================================================ */
@@ -1041,6 +1079,7 @@ function HowItWorks() {
     </section>
   );
 }
+
 /* ============================================================
    PRODUCTS TRADED — simple showcase of agro commodities
    ============================================================ */
@@ -1054,7 +1093,7 @@ function HowItWorks() {
     { name: "Palm Oil",      image: "/palm-oil.png", accent: "#D4721A", bg: "rgba(212,114,26,0.08)" },
     { name: "Chili Pepper",  image: "/chili-pepper.jpg", accent: "#D45050", bg: "rgba(212,80,80,0.08)" },
   ];
-  
+
   function FeaturedProducts() {
     const navigate = useNavigate();
     return (
@@ -1082,7 +1121,7 @@ function HowItWorks() {
               </p>
             </div>
           </AnimatedSection>
-  
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }} className="lp-4col-grid">
             {AGRO_PRODUCTS.map((item, i) => (
               <AnimatedSection key={item.name} delay={i * 80}>
@@ -1131,7 +1170,7 @@ function HowItWorks() {
               </AnimatedSection>
             ))}
           </div>
-  
+
 
         <AnimatedSection delay={350}>
           <div style={{ textAlign: "center", marginTop: 48 }}>
@@ -1681,6 +1720,10 @@ export default function LandingPage() {
       @keyframes lp-scaleUp { from { opacity: 0; transform: scale(0.95) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
       @keyframes lp-pulse   { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.8); } }
       @keyframes lp-spin   { to { transform: rotate(360deg); } }
+      @keyframes lp-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+      @keyframes lp-float-delayed { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+      .lp-float { animation: lp-float 5s ease-in-out infinite; }
+      .lp-float-delayed { animation: lp-float-delayed 5s ease-in-out infinite 1.2s; }
 
       ::-webkit-scrollbar        { width: 3px; }
       ::-webkit-scrollbar-track  { background: #F1EDE6; }
