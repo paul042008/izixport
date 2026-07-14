@@ -6,7 +6,14 @@ import { createRoot } from "react-dom/client";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+  useLocation,
+} from "react-router-dom";
 import { supabase } from "@/lib/supabase/client";
 import Index from "./pages/index";
 import NotFound from "./pages/NotFound";
@@ -63,19 +70,30 @@ const PageLoader = () => (
 // ════════════════════════════════════════════════════════
 
 /** Blocks unauthenticated users. Optionally checks allowed roles. */
-function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
+function ProtectedRoute({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+}) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
     const check = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+        return;
+      }
 
       const { data: profile } = await supabase
-        .from('users')
-        .select('role, verification_status, verified')
-        .eq('id', session.user.id)
+        .from("users")
+        .select("role, verification_status, verified")
+        .eq("id", session.user.id)
         .single();
 
       setUser({ ...session.user, ...profile });
@@ -91,42 +109,79 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 
   // Role check
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    if (user.role === 'admin') return <Navigate to="/admin" replace />;
-    if (user.role === 'exporter') return <Navigate to="/dashboard/exporter" replace />;
-    if (user.role === 'buyer') return <Navigate to="/dashboard/buyer" replace />;
+    if (user.role === "admin") return <Navigate to="/admin" replace />;
+    if (user.role === "exporter")
+      return <Navigate to="/dashboard/exporter" replace />;
+    if (user.role === "buyer")
+      return <Navigate to="/dashboard/buyer" replace />;
     return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
 }
 
-/** Prevents logged-in users from accessing login/signup. */
+/**
+ * Prevents logged-in users from accessing login/signup.
+ * EXCEPTION: If the user is on /signup with a ?type= that differs from their
+ * current role, we sign them out so they can create a new account (e.g. buyer
+ * clicking "Join as Exporter" or vice versa).
+ */
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     const check = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      // No session at all → safe to show login/signup
+      if (!session) {
+        setLoading(false);
+        return;
+      }
 
       const { data: profile } = await supabase
-        .from('users')
-        .select('role, verified')
-        .eq('id', session.user.id)
+        .from("users")
+        .select("role, verified")
+        .eq("id", session.user.id)
         .single();
 
-      if (profile?.role === 'admin') setRedirectTo('/admin');
-      else if (profile?.verified && profile?.role === 'exporter') setRedirectTo('/dashboard/exporter');
-      else if (profile?.verified && profile?.role === 'buyer') setRedirectTo('/dashboard/buyer');
-      else if (profile?.role === 'exporter') setRedirectTo('/onboarding/exporter');
-      else if (profile?.role === 'buyer') setRedirectTo('/onboarding/buyer');
-      else setRedirectTo('/');
+      const searchParams = new URLSearchParams(location.search);
+      const intendedType = searchParams.get("type");
+
+      // ROLE-SWITCH FIX:
+      // If user is on /signup with an explicit ?type= that differs from their
+      // current role, they want to create a new account. Sign them out and
+      // let the signup page render for the new role.
+      if (
+        location.pathname === "/signup" &&
+        intendedType &&
+        intendedType !== profile?.role
+      ) {
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
+      // Normal redirect flow for logged-in users
+      if (profile?.role === "admin") setRedirectTo("/admin");
+      else if (profile?.verified && profile?.role === "exporter")
+        setRedirectTo("/dashboard/exporter");
+      else if (profile?.verified && profile?.role === "buyer")
+        setRedirectTo("/dashboard/buyer");
+      else if (profile?.role === "exporter")
+        setRedirectTo("/onboarding/exporter");
+      else if (profile?.role === "buyer")
+        setRedirectTo("/onboarding/buyer");
+      else setRedirectTo("/");
 
       setLoading(false);
     };
     check();
-  }, []);
+  }, [location]);
 
   if (loading) return <PageLoader />;
   if (redirectTo) return <Navigate to={redirectTo} replace />;
@@ -134,31 +189,53 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 /** Prevents verified users from re-visiting onboarding. */
-function OnboardingGuard({ children, requiredRole }: { children: React.ReactNode; requiredRole: 'exporter' | 'buyer' }) {
+function OnboardingGuard({
+  children,
+  requiredRole,
+}: {
+  children: React.ReactNode;
+  requiredRole: "exporter" | "buyer";
+}) {
   const [loading, setLoading] = useState(true);
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
 
   useEffect(() => {
     const check = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setRedirectTo('/login'); setLoading(false); return; }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        setRedirectTo("/login");
+        setLoading(false);
+        return;
+      }
 
       const { data: profile } = await supabase
-        .from('users')
-        .select('role, verification_status, verified')
-        .eq('id', session.user.id)
+        .from("users")
+        .select("role, verification_status, verified")
+        .eq("id", session.user.id)
         .single();
 
       // Already fully verified → dashboard
       if (profile?.verified) {
-        setRedirectTo(requiredRole === 'exporter' ? '/dashboard/exporter' : '/dashboard/buyer');
+        setRedirectTo(
+          requiredRole === "exporter"
+            ? "/dashboard/exporter"
+            : "/dashboard/buyer"
+        );
         setLoading(false);
         return;
       }
 
       // Wrong role trying to access wrong onboarding path
-      if (profile?.role && profile.role !== requiredRole && profile.role !== 'user') {
-        setRedirectTo(profile.role === 'admin' ? '/admin' : `/dashboard/${profile.role}`);
+      if (
+        profile?.role &&
+        profile.role !== requiredRole &&
+        profile.role !== "user"
+      ) {
+        setRedirectTo(
+          profile.role === "admin" ? "/admin" : `/dashboard/${profile.role}`
+        );
         setLoading(false);
         return;
       }
@@ -186,7 +263,13 @@ const App = () => (
         <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* ── Public pages (redirect if logged in) ───────── */}
-            <Route element={<PublicOnlyRoute><Outlet /></PublicOnlyRoute>}>
+            <Route
+              element={
+                <PublicOnlyRoute>
+                  <Outlet />
+                </PublicOnlyRoute>
+              }
+            >
               <Route path="/signup" element={<Signup />} />
               <Route path="/login" element={<Login />} />
             </Route>
@@ -223,7 +306,7 @@ const App = () => (
             <Route
               path="/dashboard/exporter"
               element={
-                <ProtectedRoute allowedRoles={['exporter']}>
+                <ProtectedRoute allowedRoles={["exporter"]}>
                   <ExporterDashboard />
                 </ProtectedRoute>
               }
@@ -231,7 +314,7 @@ const App = () => (
             <Route
               path="/dashboard/buyer"
               element={
-                <ProtectedRoute allowedRoles={['buyer']}>
+                <ProtectedRoute allowedRoles={["buyer"]}>
                   <BuyerDashboard />
                 </ProtectedRoute>
               }
@@ -241,7 +324,7 @@ const App = () => (
             <Route
               path="/dashboard/exporter/track"
               element={
-                <ProtectedRoute allowedRoles={['exporter']}>
+                <ProtectedRoute allowedRoles={["exporter"]}>
                   <ExporterTrack />
                 </ProtectedRoute>
               }
@@ -249,7 +332,7 @@ const App = () => (
             <Route
               path="/dashboard/exporter/add-listing"
               element={
-                <ProtectedRoute allowedRoles={['exporter']}>
+                <ProtectedRoute allowedRoles={["exporter"]}>
                   <AddListing />
                 </ProtectedRoute>
               }
@@ -257,7 +340,7 @@ const App = () => (
             <Route
               path="/dashboard/exporter/bank-details"
               element={
-                <ProtectedRoute allowedRoles={['exporter']}>
+                <ProtectedRoute allowedRoles={["exporter"]}>
                   <BankDetails />
                 </ProtectedRoute>
               }
@@ -265,7 +348,7 @@ const App = () => (
             <Route
               path="/dashboard/exporter/profile"
               element={
-                <ProtectedRoute allowedRoles={['exporter']}>
+                <ProtectedRoute allowedRoles={["exporter"]}>
                   <ExporterProfile />
                 </ProtectedRoute>
               }
@@ -295,7 +378,7 @@ const App = () => (
             <Route
               path="/admin"
               element={
-                <ProtectedRoute allowedRoles={['admin']}>
+                <ProtectedRoute allowedRoles={["admin"]}>
                   <AdminPanel />
                 </ProtectedRoute>
               }
