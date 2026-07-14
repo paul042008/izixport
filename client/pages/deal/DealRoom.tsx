@@ -986,6 +986,30 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
     if (!error && data) {
+      // Check if DB has old items from previous 9-step schema
+      const validKeys = ["pre_shipment_photos", "bill_of_lading", "tracking_confirmed"];
+      const hasOldItems = data.some((item: any) => !validKeys.includes(item.step_key));
+
+      if (hasOldItems) {
+        // Delete all old items and re-seed with correct 3-step checklist
+        await supabase.from("deal_checklist").delete().eq("order_id", orderId);
+        if (isExporter) {
+          await seedChecklist();
+          // Reload after seeding
+          const { data: fresh } = await supabase
+            .from("deal_checklist")
+            .select("*")
+            .eq("order_id", orderId)
+            .order("created_at", { ascending: true });
+          if (fresh) {
+            setChecklist(fresh as ChecklistItem[]);
+            return;
+          }
+        }
+        setChecklist([]);
+        return;
+      }
+
       setChecklist(data as ChecklistItem[]);
       if (data.length === 0 && isExporter && [
         "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
