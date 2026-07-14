@@ -1117,7 +1117,7 @@ function HowItWorks() {
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
                 fontSize: 15, color: C.gray500, maxWidth: 640, lineHeight: 1.7,
               }}>
-                Nigerian exporters on IziXport list a range of agro-commodities for global buyers — here's what's traded on the platform.
+                Nigerian exporters on IziXport list a range of agro-commodities for global buyers, here's what's traded on the platform.
               </p>
             </div>
           </AnimatedSection>
@@ -1205,7 +1205,7 @@ function TrustSection() {
     },
     {
       icon: FileText, title: "Export Paperwork Support",
-      desc: "We guide exporters through NEPC registration, NXP processing, and customs documentation — so nothing gets held up at the port.",
+      desc: "We guide exporters through NEPC registration, NXP processing, and customs documentation, so nothing gets held up at the port.",
     },
     {
       icon: Headphones, title: "Dispute Mediation",
@@ -1250,7 +1250,7 @@ function TrustSection() {
               fontSize: 15, color: "rgba(255,255,255,0.45)",
               maxWidth: 560, margin: "16px auto 0", lineHeight: 1.7,
             }}>
-              Beyond escrow and verification — we handle the hard parts of international trade so you don't have to.
+              Beyond escrow and verification, we handle the hard parts of international trade so you don't have to.
             </p>
           </div>
         </AnimatedSection>

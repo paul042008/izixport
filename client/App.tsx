@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { supabase } from "@/lib/supabase/client";
-import Index from "./pages/Index";
+import Index from "./pages/index";
 import NotFound from "./pages/NotFound";
 
 // ── Auth / Onboarding / Dashboard ──────────────────────────────────────────

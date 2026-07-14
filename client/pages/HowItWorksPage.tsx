@@ -122,8 +122,8 @@ const buyerSteps = [
   { number: "03", icon: MessageCircle, title: "Send an Enquiry", desc: "Click Enquire on any listing. A private Deal Room opens between you, the exporter, and the IziXport AI Trade Facilitator.", },
   { number: "04", icon: MessageCircle, title: "Negotiate Securely", desc: "Discuss price, quantity, delivery timeline and shipping terms directly with the exporter. All communication stays inside the Deal Room – no phone numbers or external links.", },
   { number: "05", icon: Lock, title: "Pay Into Escrow", desc: "Review clear breakdown: goods value, shipping estimate, platform fee, total. Pay full amount into IziXport escrow via card, bank transfer or mobile money.", },
-  { number: "06", icon: FileText, title: "Track Every Step", desc: "Watch exporter's shipment checklist update in real time. View uploaded documents – invoice, certificate of origin, bill of lading – at every stage.", },
-  { number: "07", icon: CheckCircle2, title: "Confirm Delivery, Release Payment", desc: "When goods arrive, inspect them. If correct, click Confirm Delivery. Escrow releases automatically. If issue, raise dispute – funds stay frozen until resolved.", },
+  { number: "06", icon: FileText, title: "Track Every Step", desc: "Watch exporter's shipment checklist update in real time. View uploaded documents, invoice, certificate of origin, bill of lading, at every stage.", },
+  { number: "07", icon: CheckCircle2, title: "Confirm Delivery, Release Payment", desc: "When goods arrive, inspect them. If correct, click Confirm Delivery. Escrow releases automatically. If issue, raise dispute...funds stay frozen until resolved.", },
 ];
 
 /* ============================================================
