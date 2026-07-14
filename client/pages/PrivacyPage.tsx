@@ -58,7 +58,7 @@ export default function PrivacyPage() {
             Privacy Policy
           </h1>
           <p className="text-sm" style={{ color: "rgba(255,255,255,0.5)" }}>
-            Effective Date: To be finalized once CAC registration is complete.
+          Effective Date: 14 July 2026
           </p>
         </div>
       </div>
@@ -74,9 +74,53 @@ export default function PrivacyPage() {
           </div>
 
           <Section num="1" title="Who We Are">
-            <p>IziXport is operated by IziXport Technologies Ltd, a business registered in Nigeria under CAC registration number (pending), with its registered address at Lagos, Nigeria.</p>
-            <p className="mt-2">For any questions about this Policy or how your data is handled, you can reach us at hello@izixport.com.</p>
-          </Section>
+  <p>
+    IziXport is operated by <strong>IziXport Trade</strong>, a
+    registered Business Name under the Corporate Affairs Commission
+    (CAC) of the Federal Republic of Nigeria.
+  </p>
+
+  <div
+    className="mt-5 rounded-xl p-5"
+    style={{
+      background: "rgba(0,107,63,0.05)",
+      border: "1px solid rgba(0,107,63,0.15)",
+    }}
+  >
+    <h3
+      className="font-bold text-base mb-3"
+      style={{ color: C.greenDeep }}
+    >
+      Registered Business Information
+    </h3>
+
+    <div className="space-y-2 text-sm">
+
+      <p>
+        <strong>Business Name:</strong> IziXport Trade
+      </p>
+
+      <p>
+        <strong>CAC Business Name Registration No.:</strong> 9680606
+      </p>
+
+      <p>
+        <strong>Business Type:</strong> Registered Business Name
+      </p>
+
+      <p>
+        <strong>Country:</strong> Federal Republic of Nigeria
+      </p>
+
+    </div>
+  </div>
+
+  <p className="mt-4">
+    For any questions about this Privacy Policy or how your information
+    is handled, please contact us at
+    <strong> hello@izixport.com</strong>.
+  </p>
+</Section>
 
           <Section num="2" title="Information We Collect">
             <div className="space-y-5">
@@ -187,7 +231,17 @@ export default function PrivacyPage() {
           <Section num="11" title="Contact Us">
             <p>If you have questions, concerns, or requests regarding this Privacy Policy, contact us at:</p>
             <div className="mt-3 p-4 rounded-xl" style={{ background: C.gray100, border: `1px solid ${C.border}` }}>
-              <p className="font-semibold text-sm" style={{ color: C.gray700 }}>IziXport Technologies Ltd</p>
+            <p className="font-semibold text-sm" style={{ color: C.gray700 }}>
+  IziXport Trade
+</p>
+
+<p
+  className="text-sm mt-1"
+  style={{ color: C.gray500 }}
+>
+  CAC Business Name Registration No. 9680606
+</p>
+
               <p className="text-sm mt-1" style={{ color: C.gray500 }}>hello@izixport.com</p>
               <p className="text-sm mt-1" style={{ color: C.gray500 }}>Victoria Island, Lagos, Nigeria</p>
             </div>
@@ -197,7 +251,7 @@ export default function PrivacyPage() {
 
       {/* Footer */}
       <div className="py-8 text-center text-xs" style={{ color: C.gray400, borderTop: `1px solid ${C.border}`, background: C.white }}>
-        © 2026 IziXport Technologies Ltd. All rights reserved.
+      © 2026 IziXport Trade • CAC Business Name Registration No. 9680606 • All rights reserved.
       </div>
 
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');`}</style>
