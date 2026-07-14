@@ -15,7 +15,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { supabase } from "@/lib/supabase/client";
-import Index from "./pages/index";
+import Index from "./pages/index"; // ← change to "./pages/Index" if your file is Index.tsx
 import NotFound from "./pages/NotFound";
 
 // ── Auth / Onboarding / Dashboard ──────────────────────────────────────────
@@ -123,8 +123,7 @@ function ProtectedRoute({
 /**
  * Prevents logged-in users from accessing login/signup.
  * EXCEPTION: If the user is on /signup with a ?type= that differs from their
- * current role, we sign them out so they can create a new account (e.g. buyer
- * clicking "Join as Exporter" or vice versa).
+ * current role, we sign them out so they can create a new account.
  */
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
@@ -154,8 +153,7 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 
       // ROLE-SWITCH FIX:
       // If user is on /signup with an explicit ?type= that differs from their
-      // current role, they want to create a new account. Sign them out and
-      // let the signup page render for the new role.
+      // current role, sign them out and let the signup page render.
       if (
         location.pathname === "/signup" &&
         intendedType &&
