@@ -15,33 +15,33 @@ import {
   useLocation,
 } from "react-router-dom";
 import { supabase } from "@/lib/supabase/client";
-import Index from "./pages/index"; // ← change to "./pages/Index" if your file is Index.tsx
-import NotFound from "./pages/NotFound";
+import Index from "@/pages/index";
+import NotFound from "@/pages/NotFound";
 
 // ── Auth / Onboarding / Dashboard ──────────────────────────────────────────
-const Signup = lazy(() => import("./pages/signup"));
-const Login = lazy(() => import("./pages/login"));
-const ExporterProfile = lazy(() => import("./pages/dashboard/ExporterProfile"));
-const VerifyEmail = lazy(() => import("./pages/verify-email"));
-const ForgotPassword = lazy(() => import("./pages/forgot-password"));
-const ExporterOnboarding = lazy(() => import("./pages/onboarding/exporter"));
-const BuyerOnboarding = lazy(() => import("./pages/onboarding/buyer"));
-const ExporterDashboard = lazy(() => import("./pages/dashboard/exporter"));
-const BuyerDashboard = lazy(() => import("./pages/dashboard/buyer"));
-const AuthCallback = lazy(() => import("./pages/auth/callback"));
-const AdminPanel = lazy(() => import("./pages/admin/AdminVerification"));
+const Signup = lazy(() => import("@/pages/signup"));
+const Login = lazy(() => import("@/pages/login"));
+const ExporterProfile = lazy(() => import("@/pages/dashboard/ExporterProfile"));
+const VerifyEmail = lazy(() => import("@/pages/verify-email"));
+const ForgotPassword = lazy(() => import("@/pages/forgot-password"));
+const ExporterOnboarding = lazy(() => import("@/pages/onboarding/exporter"));
+const BuyerOnboarding = lazy(() => import("@/pages/onboarding/buyer"));
+const ExporterDashboard = lazy(() => import("@/pages/dashboard/exporter"));
+const BuyerDashboard = lazy(() => import("@/pages/dashboard/buyer"));
+const AuthCallback = lazy(() => import("@/pages/auth/callback"));
+const AdminPanel = lazy(() => import("@/pages/admin/AdminVerification"));
 
 // ── NEW PAGES ───────────────────────────────────────────────────────────────
-const Track = lazy(() => import("./pages/dashboard/Track"));
-const HowItWorksPage = lazy(() => import("./pages/HowItWorksPage"));
-const ExporterTrack = lazy(() => import("./pages/dashboard/ExporterTrack"));
-const AddListing = lazy(() => import("./pages/dashboard/AddListing"));
-const BankDetails = lazy(() => import("./pages/dashboard/BankDetails"));
-const DealRoom = lazy(() => import("./pages/deal/DealRoom"));
-const ReviewsPage = lazy(() => import("./pages/ReviewsPage"));
+const Track = lazy(() => import("@/pages/dashboard/Track"));
+const HowItWorksPage = lazy(() => import("@/pages/HowItWorksPage"));
+const ExporterTrack = lazy(() => import("@/pages/dashboard/ExporterTrack"));
+const AddListing = lazy(() => import("@/pages/dashboard/AddListing"));
+const BankDetails = lazy(() => import("@/pages/dashboard/BankDetails"));
+const DealRoom = lazy(() => import("@/pages/deal/DealRoom"));
+const ReviewsPage = lazy(() => import("@/pages/ReviewsPage"));
 // ── LEGAL PAGES ─────────────────────────────────────────────────────────────
-const TermsPage = lazy(() => import("./pages/TermsPage"));
-const PrivacyPage = lazy(() => import("./pages/PrivacyPage"));
+const TermsPage = lazy(() => import("@/pages/TermsPage"));
+const PrivacyPage = lazy(() => import("@/pages/PrivacyPage"));
 // ──────────────────────────────────────────────────────────────────────────────
 
 const queryClient = new QueryClient();
