@@ -932,6 +932,31 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
   const seedChecklist = async () => {
     if (!isExporter) return;
+
+    // Check if existing items match the new simplified 3-step schema
+    const { data: existing } = await supabase
+      .from("deal_checklist")
+      .select("step_key")
+      .eq("order_id", orderId);
+
+    const hasOldItems = existing?.some((item: any) => 
+      !["pre_shipment_photos", "bill_of_lading", "tracking_confirmed"].includes(item.step_key)
+    );
+
+    // If old items exist (from previous 9-step version), delete and re-seed
+    if (hasOldItems) {
+      await supabase.from("deal_checklist").delete().eq("order_id", orderId);
+    }
+
+    // Only seed if empty or was just cleared
+    const { data: check } = await supabase
+      .from("deal_checklist")
+      .select("id")
+      .eq("order_id", orderId)
+      .limit(1);
+
+    if (check && check.length > 0) return;
+
     const items = DEFAULT_CHECKLIST.map((step) => ({
       order_id: orderId,
       step_key: step.key,
@@ -983,7 +1008,9 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   }, [orderId]);
 
   const updateOrderStatusFromStep = async (stepKey: string) => {
-    const nextStatus = stepKey === "tracking_confirmed" ? "goods_shipped" : null;
+    let nextStatus: string | null = null;
+    if (stepKey === "bill_of_lading") nextStatus = "docs_in_progress";
+    if (stepKey === "tracking_confirmed") nextStatus = "goods_shipped";
     if (!nextStatus) return;
     await supabase.from("orders").update({ order_status: nextStatus }).eq("id", orderId);
   };
@@ -992,6 +1019,11 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
     if (!isExporter) return;
     if (step.id.startsWith("preview-")) {
       toast.error("Checklist is not active yet. Wait for escrow to be funded.");
+      return;
+    }
+    // Guard: already completed — don't duplicate messages or status updates
+    if (step.completed) {
+      toast.error("This step is already completed.");
       return;
     }
 
@@ -1588,7 +1620,8 @@ export default function DealRoom() {
       }
     };
     ensurePaymentMessage();
-  }, [order?.order_status, orderId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.order_status === "escrow_funded", orderId]);
 
   useEffect(() => {
     if (!orderId) return;
