@@ -8,6 +8,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { supabase } from '@/lib/supabase/client';
 import PlatformReviewPrompt from '@/components/PlatformReviewPrompt';
+import { generateAIResponse } from '@/lib/ai/platformKnowledge';
 
 interface Message {
   id: string;
@@ -106,6 +107,8 @@ interface CurrentUser {
 
 const PAYMENT_TRIGGERS = /\b(payment|pay now|review payment|open payment|proceed to payment|pay)\b/i;
 
+const WAKE_PHRASE = /izixport\s*ai/i;
+
 const AI_WELCOME = `Welcome to your IziXport Trade Room 👋
 
 I am your AI Trade Facilitator. I keep the deal clear, private, and trackable from negotiation to delivery.
@@ -123,6 +126,11 @@ Important:
 • No phone numbers, emails, or external links
 • Shipping details stay hidden from the buyer
 • The buyer sees only the checklist and the final estimate
+
+Need help? Just say "IziXport AI" followed by your question, e.g.:
+• "IziXport AI, how do I verify my account?"
+• "IziXport AI, what are the fees?"
+• "IziXport AI, explain the shipping process"
 
 When you are ready, tap the payment button or type "payment" to continue.`;
 
@@ -278,8 +286,9 @@ const isSimpleGreeting = (text: string) => {
 const shouldAIRespond = (text: string) => {
   if (isSimpleGreeting(text)) return false;
   if (PAYMENT_TRIGGERS.test(text)) return true;
+  if (WAKE_PHRASE.test(text)) return true; // ← NEW: respond to wake phrase
   if (text.includes("?")) return true;
-  return /\b(price|terms|payment|discount|minimum|quantity|agree|ship|issue|problem|help|deal|escrow|quality|certificate|document|freight|quote|approve|checklist|track|delivery)\b/i.test(text);
+  return /\b(price|terms|payment|discount|minimum|quantity|agree|ship|issue|problem|help|deal|escrow|quality|certificate|document|freight|quote|approve|checklist|track|delivery|verify|fee|cost|how|what|when|why|who|where|which|can|do|does|is|are|will|would|should|could|may|might|must|shall|need|want|have|has|had|did|was|were|been|being|be|am)\b/i.test(text);
 };
 
 const currentStage = (status: string) => {
@@ -1672,28 +1681,66 @@ export default function DealRoom() {
     }
   }, [orderId, refetchOrder]);
 
-  const aiReplyFor = (text: string) => {
-    const lower = text.toLowerCase();
-    if (PAYMENT_TRIGGERS.test(lower)) {
-      if (order?.order_status === "freight_approved") {
-        return "The payment button is now active in the Deal Actions tab. Tap it to review your full estimate — all secured by IziXport escrow.";
-      }
-      return "The payment button appears in Deal Actions once the exporter submits the freight quote and you approve it.";
+  const aiReplyFor = (text: string, context: {
+  isBuyer: boolean;
+  isExporter: boolean;
+  order?: Order;
+  paymentReady?: boolean;
+}) => {
+  const lower = text.toLowerCase();
+
+  // Wake phrase detected — use knowledge base for full response
+  if (WAKE_PHRASE.test(text)) {
+    // Strip wake phrase and get the actual question
+    const question = text.replace(WAKE_PHRASE, "").trim().replace(/^[,\s]+/, "");
+    if (question) {
+      return generateAIResponse(question, {
+        isBuyer: context.isBuyer,
+        isExporter: context.isExporter,
+        orderStatus: context.order?.order_status,
+        paymentReady: context.paymentReady,
+      });
     }
-    if (/(freight|shipping|quote|carrier)/i.test(text) && isExporter) {
-      return "Go to Deal Actions and fill in the freight quote form to enter your carrier, cost and estimated delivery time.";
+    // Just wake phrase with no question
+    return "I'm here! Ask me anything about IziXport — deals, payments, shipping, verification, fees, or safety. How can I help?";
+  }
+
+  // Payment triggers
+  if (PAYMENT_TRIGGERS.test(lower)) {
+    if (context.order?.order_status === "freight_approved") {
+      return "The payment button is now active in the Deal Actions tab. Tap it to review your full estimate — all secured by IziXport escrow.";
     }
-    if (/(photo|picture|image|proof)/i.test(text)) {
-      return "Upload pre-shipment photos in the checklist to show the buyer the goods are packed and ready.";
-    }
-    if (/(track|tracking|lading|bill)/i.test(text)) {
-      return "Upload the Bill of Lading, then enter the tracking number in the checklist so the buyer can independently verify the shipment.";
-    }
-    if (/(confirm|delivered|release escrow|release payment)/i.test(text)) {
-      return "Once the buyer confirms delivery, escrow will be released automatically.";
-    }
-    return "Keep the deal moving step by step. Use the checklist for shipping milestones and keep all communication inside this room.";
-  };
+    return "The payment button appears in Deal Actions once the exporter submits the freight quote and you approve it.";
+  }
+
+  // Freight/shipping
+  if (/(freight|shipping|quote|carrier)/i.test(text) && context.isExporter) {
+    return "Go to Deal Actions and fill in the freight quote form to enter your carrier, cost and estimated delivery time.";
+  }
+
+  // Photos/proof
+  if (/(photo|picture|image|proof)/i.test(text)) {
+    return "Upload pre-shipment photos in the checklist to show the buyer the goods are packed and ready.";
+  }
+
+  // Tracking/BOL
+  if (/(track|tracking|lading|bill)/i.test(text)) {
+    return "Upload the Bill of Lading, then enter the tracking number in the checklist so the buyer can independently verify the shipment.";
+  }
+
+  // Delivery/escrow release
+  if (/(confirm|delivered|release escrow|release payment)/i.test(text)) {
+    return "Once the buyer confirms delivery, escrow will be released automatically.";
+  }
+
+  // Fallback to knowledge base for any other question
+  return generateAIResponse(text, {
+    isBuyer: context.isBuyer,
+    isExporter: context.isExporter,
+    orderStatus: context.order?.order_status,
+    paymentReady: context.paymentReady,
+  });
+};
 
   const handleSend = async () => {
     if (!currentUser || !order || !orderId || sending) return;
@@ -1722,7 +1769,12 @@ export default function DealRoom() {
       }
 
       if (shouldAIRespond(text)) {
-        const reply = aiReplyFor(text);
+        const reply = aiReplyFor(text, {
+          isBuyer,
+          isExporter,
+          order,
+          paymentReady,
+        });
         setTimeout(async () => {
           await supabase.from("messages").insert({ order_id: orderId, sender_type: "ai", is_ai: true, content: reply });
         }, 700);
@@ -1922,7 +1974,7 @@ export default function DealRoom() {
           </>
         ) : (
           <div style={{ flex: 1, height: "calc(100dvh - 160px)", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "14px", display: "grid", gap: 12, paddingBottom: "max(40px, env(safe-area-inset-bottom, 24px))" }}>
-            {isExporter && !order.freight_company && (
+            {isExporter && (!order.freight_company || order.order_status === "enquiring") && (
               <FreightQuoteForm orderId={order.id} orderCurrency={currency} onSubmitted={() => refetchOrder()} />
             )}
 
