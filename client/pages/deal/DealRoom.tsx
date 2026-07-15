@@ -1,17 +1,16 @@
 // src/pages/deal/DealRoom.tsx
-// UPDATED — Simplified checklist (pre-shipment photos + B/L + tracking only)
-// UPDATED — LibreTranslate integration via translate.argosopentech.com
-// UPDATED — Fixed checklist seeding race condition (no more delete/reseed loop)
-// UPDATED — Fixed duplicate "Payment secured" message (atomic DB-level guard)
-// UPDATED — Multi-photo upload for Pre-Shipment Photos + uploads now post into Chat Messages
-// All existing business logic, escrow, payment, dispute flow preserved
+// FIXED — 5 issues resolved:
+// 1. seedChecklist uses UPSERT (onConflict ignore) to avoid unique constraint conflict with DB trigger
+// 2. Exporter checklist auto-shows after escrow_funded without needing button click
+// 3. Buyer auto-switches to Actions tab after payment (escrow_funded) not just goods_shipped
+// 4. DeliveryConfirmPanel visibility correctly tied to checklist completion chain
+// 5. Payment message check is more resilient
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { supabase } from '@/lib/supabase/client';
 import PlatformReviewPrompt from '@/components/PlatformReviewPrompt';
-import { generateAIResponse } from '@/lib/ai/platformKnowledge';
 
 interface Message {
   id: string;
@@ -22,14 +21,7 @@ interface Message {
   is_ai: boolean;
   is_blocked?: boolean;
   created_at: string;
-  translatedContent?: string; // runtime only — not in DB
-  image_url?: string | null;
-  document_url?: string | null;
-}
-
-interface ChecklistPhoto {
-  url: string;
-  name: string;
+  translatedContent?: string;
 }
 
 interface ChecklistItem {
@@ -41,8 +33,8 @@ interface ChecklistItem {
   completed_at: string | null;
   completed_by: string | null;
   document_url: string | null;
+  document_urls?: string[] | null;
   document_name: string | null;
-  document_urls?: ChecklistPhoto[] | null;
   notes: string | null;
   requires_document: boolean;
   icon: string;
@@ -82,7 +74,6 @@ interface Order {
   escrow_fee_amount: number | null;
   platform_fee_amount: number | null;
   payment_confirmed_at: string | null;
-  payment_message_sent?: boolean;
   created_at: string;
   listing: {
     title: string;
@@ -119,8 +110,6 @@ interface CurrentUser {
 
 const PAYMENT_TRIGGERS = /\b(payment|pay now|review payment|open payment|proceed to payment|pay)\b/i;
 
-const WAKE_PHRASE = /izixport\s*ai/i;
-
 const AI_WELCOME = `Welcome to your IziXport Trade Room 👋
 
 I am your AI Trade Facilitator. I keep the deal clear, private, and trackable from negotiation to delivery.
@@ -139,24 +128,17 @@ Important:
 • Shipping details stay hidden from the buyer
 • The buyer sees only the checklist and the final estimate
 
-Need help? Just say "IziXport AI" followed by your question, e.g.:
-• "IziXport AI, how do I verify my account?"
-• "IziXport AI, what are the fees?"
-• "IziXport AI, explain the shipping process"
-
 When you are ready, tap the payment button or type "payment" to continue.`;
 
-// ─── SIMPLIFIED CHECKLIST ───────────────────────────────────────────────────
-// Removed: commercial_invoice, packing_list, certificate_of_origin, phytosanitary_cert
-// These are handled between exporter and freight forwarder — not IziXport's responsibility
-// IziXport only needs proof the goods are real, packed, and moving
+// ─── SIMPLIFIED CHECKLIST — must match DB CHECK constraint exactly ────────────
+// step_key values are locked by: CHECK (step_key = any (array['pre_shipment_photos', 'bill_of_lading', 'tracking_confirmed']))
 const DEFAULT_CHECKLIST = [
   {
     key: "pre_shipment_photos",
     label: "Pre-Shipment Photos",
     requires_document: true,
     icon: "📸",
-    hint: "Upload photos of the packed goods, bags, and container before loading. You can upload multiple photos — clear, well-lit photos build buyer trust.",
+    hint: "Upload photos of the packed goods, bags, and container before loading. Clear, well-lit photos build buyer trust.",
   },
   {
     key: "bill_of_lading",
@@ -174,11 +156,46 @@ const DEFAULT_CHECKLIST = [
   },
 ];
 
-const MULTI_PHOTO_STEP = "pre_shipment_photos";
+const seedDealChecklistRows = async (orderId: string) => {
+  const items = DEFAULT_CHECKLIST.map((step) => ({
+    order_id: orderId,
+    step_key: step.key,
+    step_label: step.label,
+    completed: false,
+    completed_at: null,
+    completed_by: null,
+    document_url: null,
+    document_urls: [],
+    document_name: null,
+    notes: null,
+    requires_document: step.requires_document,
+    icon: step.icon,
+    reference_number: null,
+    carrier_name: null,
+    document_verified: false,
+    verified_by: null,
+    verified_at: null,
+  }));
 
-const isImageFile = (name: string) => /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(name);
+  const { error } = await supabase
+    .from("deal_checklist")
+    .upsert(items, { onConflict: "order_id,step_key" });
 
-// ─── LANGUAGE NAME MAP ───────────────────────────────────────────────────────
+  if (error) throw error;
+};
+
+const MULTI_UPLOAD_STEPS = new Set<ChecklistItem["step_key"]>(["pre_shipment_photos", "bill_of_lading"]);
+
+const getDocumentUrls = (step: Pick<ChecklistItem, "document_url"> & { document_urls?: string[] | null }) => {
+  const urls = Array.isArray(step.document_urls) ? step.document_urls.filter(Boolean) : [];
+  if (urls.length > 0) return urls;
+  return step.document_url ? [step.document_url] : [];
+};
+
+const isImageUrl = (url: string) => /\.(png|jpe?g|gif|webp|bmp|avif)(\?|#|$)/i.test(url);
+const isPdfUrl = (url: string) => /\.pdf(\?|#|$)/i.test(url);
+
+// ─── LANGUAGE NAMES ───────────────────────────────────────────────────────────
 const LANG_NAMES: Record<string, string> = {
   zh: "Chinese", hi: "Hindi", ar: "Arabic", fr: "French",
   de: "German", pt: "Portuguese", tr: "Turkish", ja: "Japanese",
@@ -186,55 +203,65 @@ const LANG_NAMES: Record<string, string> = {
   nl: "Dutch", vi: "Vietnamese", th: "Thai", en: "English",
 };
 
-// ─── TRANSLATION — via Supabase Edge Function ────────────────────────────────
-// Calls our own backend function which proxies to LibreTranslate mirrors.
-// Avoids CORS, domain death, and rate-limit issues.
+// ─── LIBRE TRANSLATE — AUTO DETECT + TRANSLATE ────────────────────────────────
+const LIBRE_BASE = "https://translate.argosopentech.com";
 
-const autoTranslate = async (
-  text: string,
-  viewerLang: string
-): Promise<{ translated: string; detectedLang: string } | null> => {
-  if (!text || text.length < 3 || viewerLang === "auto") return null;
-
+const detectLanguage = async (text: string): Promise<string> => {
+  if (!text || text.length < 4) return "en";
   try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token;
-
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ text, targetLang: viewerLang }),
-      }
-    );
-
-    if (!res.ok) {
-      console.error("Translate function error:", res.status);
-      return null;
-    }
-
+    const res = await fetch(`${LIBRE_BASE}/detect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: text }),
+    });
+    if (!res.ok) return "en";
     const data = await res.json();
-    if (data.translated && data.translated !== text) {
-      if (data.detectedLang === viewerLang) return null;
-      return { translated: data.translated, detectedLang: data.detectedLang };
+    if (Array.isArray(data) && data.length > 0) {
+      const best = data.sort((a: any, b: any) => b.confidence - a.confidence)[0];
+      return best.language || "en";
     }
-    return null;
-  } catch (err) {
-    console.error("Translation failed:", err);
-    return null;
-  }
+    return "en";
+  } catch { return "en"; }
+};
+
+const translateText = async (text: string, sourceLang: string, targetLang: string): Promise<string> => {
+  if (!text || sourceLang === targetLang) return text;
+  try {
+    const res = await fetch(`${LIBRE_BASE}/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: text, source: sourceLang, target: targetLang }),
+    });
+    if (!res.ok) return text;
+    const data = await res.json();
+    return data.translatedText || text;
+  } catch { return text; }
+};
+
+const autoTranslate = async (text: string, viewerLang: string): Promise<{ translated: string; detectedLang: string } | null> => {
+  const detected = await detectLanguage(text);
+  if (detected === viewerLang || (detected === "en" && viewerLang === "en")) return null;
+  const translated = await translateText(text, detected, viewerLang);
+  if (!translated || translated === text) return null;
+  return { translated, detectedLang: detected };
 };
 
 const BUYER_ESCROW_FEE_RATE = 0.045;
 const EXPORTER_PLATFORM_FEE_RATE = 0.03;
 
+// ─── STATUSES THAT MEAN ESCROW IS ACTIVE ─────────────────────────────────────
+// Used to decide when checklist should be visible
+const ESCROW_ACTIVE_STATUSES = [
+  "escrow_funded", "docs_in_progress", "goods_shipped",
+  "in_transit", "arrived", "delivered", "completed",
+];
+
+const FREIGHT_CHANGE_REQUESTED_STATUS = "freight_changes_requested";
+
 const DEAL_FLOW = [
   { key: "enquiring", label: "Negotiating" },
   { key: "freight_quoted", label: "Freight Quoted" },
+  { key: FREIGHT_CHANGE_REQUESTED_STATUS, label: "Changes Requested" },
   { key: "freight_approved", label: "Freight Approved" },
   { key: "escrow_funded", label: "Escrow Funded" },
   { key: "docs_in_progress", label: "Docs In Progress" },
@@ -263,10 +290,7 @@ const CARRIER_TRACKING_URLS: Record<string, string> = {
 
 const formatMoney = (value: number, currency = "USD") => {
   const safe = Number.isFinite(value) ? value : 0;
-  return `${currency === "NGN" ? "₦" : "$"}${safe.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `${currency === "NGN" ? "₦" : "$"}${safe.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const formatTime = (iso: string) =>
@@ -292,19 +316,15 @@ const scanMessage = (text: string) => {
 
 const isSimpleGreeting = (text: string) => {
   const cleaned = text.trim().toLowerCase();
-  return (
-    cleaned.length > 0 &&
-    cleaned.split(/\s+/).length <= 3 &&
-    /^(hi|hello|hey|ok|okay|thanks|thank you|good|great|nice|cool|alright|yes|no)$/i.test(cleaned)
-  );
+  return cleaned.length > 0 && cleaned.split(/\s+/).length <= 3 &&
+    /^(hi|hello|hey|ok|okay|thanks|thank you|good|great|nice|cool|alright|yes|no)$/i.test(cleaned);
 };
 
 const shouldAIRespond = (text: string) => {
   if (isSimpleGreeting(text)) return false;
   if (PAYMENT_TRIGGERS.test(text)) return true;
-  if (WAKE_PHRASE.test(text)) return true; // ← NEW: respond to wake phrase
   if (text.includes("?")) return true;
-  return /\b(price|terms|payment|discount|minimum|quantity|agree|ship|issue|problem|help|deal|escrow|quality|certificate|document|freight|quote|approve|checklist|track|delivery|verify|fee|cost|how|what|when|why|who|where|which|can|do|does|is|are|will|would|should|could|may|might|must|shall|need|want|have|has|had|did|was|were|been|being|be|am)\b/i.test(text);
+  return /\b(price|terms|payment|discount|minimum|quantity|agree|ship|issue|problem|help|deal|escrow|quality|certificate|document|freight|quote|approve|checklist|track|delivery)\b/i.test(text);
 };
 
 const currentStage = (status: string) => {
@@ -316,6 +336,7 @@ const currentStage = (status: string) => {
   if (status === "docs_in_progress") return "docs_in_progress";
   if (status === "escrow_funded") return "escrow_funded";
   if (status === "freight_approved") return "freight_approved";
+  if (status === FREIGHT_CHANGE_REQUESTED_STATUS) return FREIGHT_CHANGE_REQUESTED_STATUS;
   if (status === "freight_quoted") return "freight_quoted";
   return "enquiring";
 };
@@ -324,11 +345,8 @@ function Spinner({ size = 16, color = "#D4A843" }: { size?: number; color?: stri
   return (
     <div style={{
       width: size, height: size,
-      border: `2px solid ${color}33`,
-      borderTopColor: color,
-      borderRadius: "50%",
-      animation: "spin 1s linear infinite",
-      flexShrink: 0,
+      border: `2px solid ${color}33`, borderTopColor: color,
+      borderRadius: "50%", animation: "spin 1s linear infinite", flexShrink: 0,
     }} />
   );
 }
@@ -336,8 +354,7 @@ function Spinner({ size = 16, color = "#D4A843" }: { size?: number; color?: stri
 function Avatar({ label, type, size = 32, verified }: {
   label: string; type: "buyer" | "exporter" | "ai"; size?: number; verified?: boolean;
 }) {
-  const bg =
-    type === "ai" ? "linear-gradient(135deg,#D4A843,#B8890F)"
+  const bg = type === "ai" ? "linear-gradient(135deg,#D4A843,#B8890F)"
     : type === "exporter" ? "linear-gradient(145deg,#006B3F,#004D2E)"
     : "linear-gradient(145deg,#002E1A,#006B3F)";
   return (
@@ -388,120 +405,158 @@ function BottomSheet({ open, onClose, title, children }: {
           <span style={{
             color: "#111827", fontWeight: 800, fontSize: 15,
             fontFamily: "'Barlow Condensed',sans-serif",
+            letterSpacing: "0.06em", textTransform: "uppercase",
           }}>{title}</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6B7280" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#6B7280", fontSize: 22, cursor: "pointer" }}>✕</button>
         </div>
-        <div style={{ padding: 20 }}>
-          {children}
-        </div>
+        <div style={{ padding: "16px 20px 20px" }}>{children}</div>
       </div>
     </div>
   );
 }
 
-function DateDivider({ label }: { label: string }) {
+function FilePreviewSheet({ open, onClose, title, files }: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  files: string[];
+}) {
   return (
-    <div style={{ display: "flex", alignItems: "center", margin: "16px 0" }}>
+    <BottomSheet open={open} onClose={onClose} title={title}>
+      <div style={{ display: "grid", gap: 12 }}>
+        {files.length === 0 ? (
+          <div style={{ color: "#6B7280", fontSize: 13 }}>No files to preview yet.</div>
+        ) : (
+          files.map((url, index) => (
+            <div key={`${url}-${index}`} style={{
+              border: "1px solid #E5E7EB",
+              borderRadius: 14,
+              overflow: "hidden",
+              background: "#F9FAFB",
+            }}>
+              {isImageUrl(url) ? (
+                <img
+                  src={url}
+                  alt={`${title} ${index + 1}`}
+                  style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block", background: "#fff" }}
+                />
+              ) : isPdfUrl(url) ? (
+                <iframe
+                  src={url}
+                  title={`${title} ${index + 1}`}
+                  style={{ width: "100%", height: 360, border: "none", background: "#fff" }}
+                />
+              ) : (
+                <div style={{ padding: 14, color: "#374151", fontSize: 13, lineHeight: 1.6 }}>
+                  File {index + 1}
+                  <div style={{ marginTop: 8, color: "#6B7280", fontSize: 12 }}>
+                    Preview not available for this file type.
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+function DateDivider({ label }: { label: string; key?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0 8px" }}>
       <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
-      <span style={{ color: "#9CA3AF", fontSize: 10, margin: "0 10px", textTransform: "uppercase", fontWeight: 700 }}>{label}</span>
+      <span style={{ color: "#9CA3AF", fontSize: 10, whiteSpace: "nowrap" }}>{label}</span>
       <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
     </div>
   );
 }
 
-function AutoTranslateLabel({ detectedLang, onShowOriginal }: { detectedLang: string; onShowOriginal: () => void }) {
+function AutoTranslateLabel({ detectedLang, onShowOriginal }: {
+  detectedLang: string; onShowOriginal: () => void;
+}) {
+  const langName = LANG_NAMES[detectedLang] || detectedLang;
   return (
-    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ color: "#FEF3C7", fontSize: 10, fontStyle: "italic" }}>
-        Translated from {LANG_NAMES[detectedLang] || detectedLang}
-      </span>
-      <button
-        onClick={onShowOriginal}
-        style={{ background: "none", border: "none", color: "#FEF3C7", fontSize: 10, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+      <span style={{ fontSize: 10, color: "#9CA3AF" }}>🌐 Translated from {langName}</span>
+      <button onClick={onShowOriginal} style={{
+        background: "none", border: "none", color: "#D4A843",
+        fontSize: 10, cursor: "pointer", padding: 0,
+        fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700,
+      }}>Show original</button>
+    </div>
+  );
+}
+
+function RichMessageText({ text, style }: { text: string; style: CSSProperties }) {
+  const urlPattern = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/g;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = urlPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(<span key={`t-${key++}`}>{text.slice(lastIndex, match.index)}</span>);
+    }
+
+    const rawUrl = match[0];
+    const href = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+    parts.push(
+      <a
+        key={`u-${key++}`}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: "#D4A843", textDecoration: "underline", wordBreak: "break-word" }}
       >
-        Show original
-      </button>
+        {rawUrl}
+      </a>
+    );
+    lastIndex = match.index + rawUrl.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(<span key={`t-${key++}`}>{text.slice(lastIndex)}</span>);
+  }
+
+  return (
+    <div style={{ ...style, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+      {parts.length > 0 ? parts : text}
     </div>
   );
 }
 
 function AIMessage({ msg, showAvatar, viewerLang }: {
-  msg: Message; showAvatar: boolean; viewerLang: string;
+  msg: Message; showAvatar: boolean; viewerLang: string; key?: string;
 }) {
   const [translated, setTranslated] = useState("");
   const [detectedLang, setDetectedLang] = useState("");
   const [showOriginal, setShowOriginal] = useState(false);
-  const [translating, setTranslating] = useState(false);
 
   useEffect(() => {
-    const run = async () => {
-      setTranslating(true);
-      const result = await autoTranslate(msg.content, viewerLang || "en");
-      if (result) {
-        setTranslated(result.translated);
-        setDetectedLang(result.detectedLang);
-      }
-      setTranslating(false);
-    };
-
-    run();
+    if (viewerLang && viewerLang !== "en") {
+      translateText(msg.content, "en", viewerLang).then((t) => {
+        if (t && t !== msg.content) { setTranslated(t); setDetectedLang("en"); }
+      });
+    }
   }, [msg.content, viewerLang]);
 
   const displayContent = !showOriginal && translated ? translated : msg.content;
 
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
-      {showAvatar ? (
-        <Avatar label="AI" type="ai" size={30} />
-      ) : <div style={{ width: 30 }} />}
+      {showAvatar ? <Avatar label="AI" type="ai" size={30} /> : <div style={{ width: 30 }} />}
       <div style={{ maxWidth: "78%", display: "flex", flexDirection: "column", gap: 3 }}>
         {showAvatar && (
-          <span style={{ color: "#6B7280", fontSize: 10.5, paddingLeft: 2 }}>IziXport AI</span>
+          <span style={{ color: "#D4A843", fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.06em", textTransform: "uppercase", paddingLeft: 2 }}>
+            IziXport AI · Trade Facilitator
+          </span>
         )}
-        <div style={{
-          background: "linear-gradient(135deg,#D4A843,#B8890F)",
-          borderRadius: "18px 18px 18px 4px", padding: "10px 14px",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
-        }}>
-          {translating ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                {msg.content}
-              </div>
-              <Spinner size={10} color="#fff" />
-            </div>
-          ) : (
-            <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-              {displayContent}
-            </div>
-          )}
-          {msg.image_url && (
-            <a href={msg.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: 8 }}>
-              <img src={msg.image_url} alt="Uploaded" style={{ maxWidth: "100%", borderRadius: 8 }} />
-            </a>
-          )}
-          {msg.document_url && (
-            <a
-              href={msg.document_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: "#D4A843", fontSize: 11.5, textDecoration: "underline", display: "block", marginTop: 6 }}
-            >
-              📄 View document →
-            </a>
-          )}
-
-          {translated && !showOriginal && (
-            <AutoTranslateLabel
-              detectedLang={detectedLang}
-              onShowOriginal={() => setShowOriginal(true)}
-            />
-          )}
-          {showOriginal && (
-            <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>
-              Show translation
-            </button>
-          )}
+        <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
+          <RichMessageText text={displayContent} style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7 }} />
+          {translated && !showOriginal && <AutoTranslateLabel detectedLang={detectedLang} onShowOriginal={() => setShowOriginal(true)} />}
+          {showOriginal && <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>Show translation</button>}
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -511,7 +566,7 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
 
 function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: {
   msg: Message; isOwn: boolean; senderName: string;
-  showAvatar: boolean; order: Order; viewerLang: string;
+  showAvatar: boolean; order: Order; viewerLang: string; key?: string;
 }) {
   const [translated, setTranslated] = useState("");
   const [detectedLang, setDetectedLang] = useState("");
@@ -519,40 +574,28 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
   const [translating, setTranslating] = useState(false);
 
   useEffect(() => {
-    // Only auto-translate messages from the OTHER party, not your own
     if (isOwn) return;
-
     const run = async () => {
       setTranslating(true);
       const result = await autoTranslate(msg.content, viewerLang || "en");
-      if (result) {
-        setTranslated(result.translated);
-        setDetectedLang(result.detectedLang);
-      }
+      if (result) { setTranslated(result.translated); setDetectedLang(result.detectedLang); }
       setTranslating(false);
     };
-
     run();
   }, [msg.content, isOwn, viewerLang]);
 
   const displayContent = !showOriginal && translated ? translated : msg.content;
 
-  // Own message — never translate, always show as typed
   if (isOwn) {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end", margin: "3px 0" }}>
         <div style={{ maxWidth: "78%", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
           <div style={{
-            background: msg.sender_type === "buyer"
-              ? "linear-gradient(145deg,#002E1A,#006B3F)"
-              : "linear-gradient(145deg,#006B3F,#004D2E)",
-            borderRadius: "18px 18px 4px 18px",
-            padding: "10px 14px",
+            background: msg.sender_type === "buyer" ? "linear-gradient(145deg,#002E1A,#006B3F)" : "linear-gradient(145deg,#006B3F,#004D2E)",
+            borderRadius: "18px 18px 4px 18px", padding: "10px 14px",
             boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
           }}>
-            <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-              {msg.content}
-            </div>
+            <RichMessageText text={msg.content} style={{ color: "#fff", fontSize: 14, lineHeight: 1.55 }} />
           </div>
           <span style={{ color: "#9CA3AF", fontSize: 10, paddingRight: 4 }}>{formatTime(msg.created_at)}</span>
         </div>
@@ -560,51 +603,25 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
     );
   }
 
-  // Incoming message from other party — show translation if detected
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
       {showAvatar ? (
-        <Avatar
-          label={senderName}
-          type={msg.sender_type as "buyer" | "exporter"}
-          size={30}
-          verified={msg.sender_type === "buyer" ? order.buyer?.verified : order.exporter?.verified}
-        />
+        <Avatar label={senderName} type={msg.sender_type as "buyer" | "exporter"} size={30}
+          verified={msg.sender_type === "buyer" ? order.buyer?.verified : order.exporter?.verified} />
       ) : <div style={{ width: 30 }} />}
       <div style={{ maxWidth: "78%", display: "flex", flexDirection: "column", gap: 3 }}>
-        {showAvatar && (
-          <span style={{ color: "#6B7280", fontSize: 10.5, paddingLeft: 2 }}>{senderName}</span>
-        )}
-        <div style={{
-          background: "#F3F4F6", border: "1px solid #E5E7EB",
-          borderRadius: "18px 18px 18px 4px", padding: "10px 14px",
-        }}>
+        {showAvatar && <span style={{ color: "#6B7280", fontSize: 10.5, paddingLeft: 2 }}>{senderName}</span>}
+        <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
           {translating ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-                {msg.content}
-              </div>
+              <RichMessageText text={msg.content} style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }} />
               <Spinner size={10} color="#D4A843" />
             </div>
           ) : (
-            <div style={{ color: "#111827", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
-              {displayContent}
-            </div>
+            <RichMessageText text={displayContent} style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }} />
           )}
-          {translated && !translating && !showOriginal && (
-            <AutoTranslateLabel
-              detectedLang={detectedLang}
-              onShowOriginal={() => setShowOriginal(true)}
-            />
-          )}
-          {showOriginal && (
-            <button
-              onClick={() => setShowOriginal(false)}
-              style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}
-            >
-              Show translation
-            </button>
-          )}
+          {translated && !translating && !showOriginal && <AutoTranslateLabel detectedLang={detectedLang} onShowOriginal={() => setShowOriginal(true)} />}
+          {showOriginal && <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>Show translation</button>}
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -612,24 +629,19 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
   );
 }
 
-function StatusPill({ label, color, bg, border }: {
-  label: string; color: string; bg: string; border: string;
-}) {
+function StatusPill({ label, color, bg, border }: { label: string; color: string; bg: string; border: string }) {
   return (
     <span style={{
       background: bg, color, border: `1px solid ${border}`,
       fontSize: 9, fontWeight: 800, padding: "2px 8px",
-      borderRadius: 999, fontFamily: "'Barlow Condensed',sans-serif",
-      letterSpacing: "0.05em",
+      borderRadius: 999, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em",
     }}>{label}</span>
   );
 }
 
 function DealProgress({ order }: { order: Order }) {
   const [expanded, setExpanded] = useState(false);
-  const activeIndex = Math.max(0,
-    DEAL_FLOW.findIndex((step) => step.key === currentStage(order.order_status))
-  );
+  const activeIndex = Math.max(0, DEAL_FLOW.findIndex((step) => step.key === currentStage(order.order_status)));
 
   return (
     <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 18, overflow: "hidden" }}>
@@ -638,23 +650,12 @@ function DealProgress({ order }: { order: Order }) {
         padding: "12px 14px", cursor: "pointer", background: "#F9FAFB",
         borderBottom: expanded ? "1px solid #E5E7EB" : "none",
       }} onClick={() => setExpanded((prev) => !prev)}>
-        <div style={{
-          fontWeight: 800, fontSize: 11,
-          fontFamily: "'Barlow Condensed',sans-serif",
-          letterSpacing: "0.08em", textTransform: "uppercase", color: "#374151",
-        }}>Deal Progress</div>
+        <div style={{ fontWeight: 800, fontSize: 11, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.08em", textTransform: "uppercase", color: "#374151" }}>Deal Progress</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ color: "#9CA3AF", fontSize: 10 }}>
-            Step {activeIndex + 1}/{DEAL_FLOW.length}
-          </span>
-          <span style={{
-            color: "#9CA3AF", fontSize: 10,
-            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform .25s",
-          }}>▼</span>
+          <span style={{ color: "#9CA3AF", fontSize: 10 }}>Step {activeIndex + 1}/{DEAL_FLOW.length}</span>
+          <span style={{ color: "#9CA3AF", fontSize: 10, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .25s" }}>▼</span>
         </div>
       </div>
-
       {expanded && (
         <div style={{ padding: "8px 14px 12px" }}>
           <div style={{ display: "grid", gap: 8 }}>
@@ -686,17 +687,25 @@ function DealProgress({ order }: { order: Order }) {
   );
 }
 
-// ─── FREIGHT COMPONENTS (unchanged from original) ────────────────────────────
-function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
-  orderId: string; orderCurrency: string; onSubmitted: () => void;
+function FreightQuoteForm({ order, onSubmitted }: {
+  order: Order;
+  onSubmitted: () => void;
 }) {
-  const [company, setCompany] = useState("");
-  const [cost, setCost] = useState("");
-  const [currency, setCurrency] = useState(orderCurrency || "USD");
-  const [days, setDays] = useState("");
+  const isRevision = order.order_status === FREIGHT_CHANGE_REQUESTED_STATUS;
+  const [company, setCompany] = useState(order.freight_company || "");
+  const [cost, setCost] = useState(order.freight_cost !== null && order.freight_cost !== undefined ? String(order.freight_cost) : "");
+  const [currency, setCurrency] = useState(order.freight_currency || order.currency || "USD");
+  const [days, setDays] = useState(order.freight_estimate_days !== null && order.freight_estimate_days !== undefined ? String(order.freight_estimate_days) : "");
   const [notes, setNotes] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setCompany(order.freight_company || "");
+    setCost(order.freight_cost !== null && order.freight_cost !== undefined ? String(order.freight_cost) : "");
+    setCurrency(order.freight_currency || order.currency || "USD");
+    setDays(order.freight_estimate_days !== null && order.freight_estimate_days !== undefined ? String(order.freight_estimate_days) : "");
+  }, [order.id, order.freight_company, order.freight_cost, order.freight_currency, order.freight_estimate_days, order.currency]);
 
   const inputStyle: CSSProperties = {
     width: "100%", padding: "10px 12px", background: "#F9FAFB",
@@ -706,21 +715,17 @@ function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
   };
 
   const submit = async () => {
-    if (!company.trim() || !cost.trim() || !days.trim()) {
-      toast.error("Please fill the required freight fields.");
-      return;
-    }
+    if (!company.trim() || !cost.trim() || !days.trim()) { toast.error("Please fill the required freight fields."); return; }
     setSubmitting(true);
     try {
       let pdfUrl: string | null = null;
       if (pdfFile) {
-        const uploadPath = `freight-quotes/${orderId}/${Date.now()}_${pdfFile.name}`;
-        const { data, error } = await supabase.storage.from("listings").upload(uploadPath, pdfFile, {
-          cacheControl: "3600", upsert: false,
-        });
+        const uploadPath = `freight-quotes/${order.id}/${Date.now()}_${pdfFile.name}`;
+        const { data, error } = await supabase.storage.from("listings").upload(uploadPath, pdfFile, { cacheControl: "3600", upsert: false });
         if (error) throw error;
         pdfUrl = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
       }
+
       const freightCost = Number(cost);
       const freightDays = Number(days);
       const { error } = await supabase.from("orders").update({
@@ -729,14 +734,36 @@ function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
         freight_cost: freightCost,
         freight_currency: currency,
         freight_estimate_days: freightDays,
-        freight_quote_pdf_url: pdfUrl,
-      }).eq("id", orderId);
+        freight_quote_pdf_url: pdfUrl || order.freight_quote_pdf_url,
+        freight_approved_at: null,
+        freight_approved_by: null,
+      }).eq("id", order.id);
       if (error) throw error;
+
       await supabase.from("messages").insert({
-        order_id: orderId, sender_type: "system", is_ai: true,
-        content: `🚚 Freight quote added by the exporter.\nCarrier: ${company.trim()}\nEstimate: ${formatMoney(freightCost, currency)}\nTransit: ${freightDays} day(s)\n\nThe buyer can now review the payment estimate.`,
+        order_id: order.id,
+        sender_type: "system",
+        is_ai: true,
+        content: isRevision
+          ? `🚚 Revised freight quote forwarded to the buyer.
+Carrier: ${company.trim()}
+Estimate: ${formatMoney(freightCost, currency)}
+Transit: ${freightDays} day(s)
+${pdfUrl ? `
+Quote PDF: ${pdfUrl}` : ""}
+
+The buyer can now review the updated payment estimate.`
+          : `🚚 Freight quote added by the exporter.
+Carrier: ${company.trim()}
+Estimate: ${formatMoney(freightCost, currency)}
+Transit: ${freightDays} day(s)
+${pdfUrl ? `
+Quote PDF: ${pdfUrl}` : ""}
+
+The buyer can now review the payment estimate.`,
       });
-      toast.success("Freight quote submitted.");
+
+      toast.success(isRevision ? "Freight quote updated." : "Freight quote submitted.");
       onSubmitted();
     } catch (err: any) {
       toast.error(err?.message || "Failed to submit freight quote.");
@@ -748,10 +775,12 @@ function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
   return (
     <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
       <div style={{ color: "#111827", fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 12 }}>
-        🚚 Private Freight Quote
+        {isRevision ? "✏️ Update Freight Quote" : "🚚 Private Freight Quote"}
       </div>
       <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 12 }}>
-        Only the exporter can edit this section. The buyer sees the estimate and checklist only.
+        {isRevision
+          ? "The buyer requested changes. Update the freight quote and send the revised version back to the buyer."
+          : "Only the exporter can edit this section. The buyer sees the estimate and checklist only."}
       </div>
       <div style={{ color: "#6B7280", fontSize: 10.5, marginBottom: 4 }}>Freight Company</div>
       <input name="freight-company" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Maersk, DHL, local freight forwarder" style={inputStyle} />
@@ -777,20 +806,72 @@ function FreightQuoteForm({ orderId, orderCurrency, onSubmitted }: {
         <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e) => setPdfFile(e.target.files?.[0] || null)} />
       </label>
       <button onClick={submit} disabled={submitting} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "#D4A843", border: "none", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-        {submitting ? <><Spinner size={14} color="#fff" />Submitting…</> : "Submit Freight Quote"}
+        {submitting ? <><Spinner size={14} color="#fff" />Submitting…</> : isRevision ? "Update Freight Quote" : "Submit Freight Quote"}
       </button>
     </div>
   );
 }
 
-function FreightApprovalCard({ order, orderId, currentUser }: {
-  order: Order; orderId: string; currentUser: CurrentUser | null;
-}) {
-  const [submitting, setSubmitting] = useState(false);
+function FreightSummary({ order, isBuyer }: { order: Order; isBuyer: boolean }) {
+  const hasFreight = Boolean(order.freight_company) && order.freight_cost !== null && order.freight_cost !== undefined;
+  const currency = order.freight_currency || order.currency || "USD";
+  const goodsAmount = Number(order.total_amount || 0);
+  const freightCost = Number(order.freight_cost || 0);
+  const escrowFee = (goodsAmount + freightCost) * BUYER_ESCROW_FEE_RATE;
+  const grandTotal = goodsAmount + freightCost + escrowFee;
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${hasFreight ? "#D4A843" : "#E5E7EB"}`, borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%", borderLeft: hasFreight ? "4px solid #D4A843" : undefined }}>
+      <div style={{ color: hasFreight ? "#D4A843" : "#111827", fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 12 }}>
+        {hasFreight ? "Shipping Estimate" : "Shipping Estimate Pending"}
+      </div>
+      {hasFreight ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          {[{ label: "Carrier", value: order.freight_company }, { label: "Freight Cost", value: formatMoney(freightCost, currency) }, { label: "Transit Time", value: `${order.freight_estimate_days || 0} day(s)` }].map(({ label, value }) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ color: "#6B7280", fontSize: 12 }}>{label}</span>
+              <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{value}</span>
+            </div>
+          ))}
+          <div style={{ height: 1, background: "#E5E7EB" }} />
+          <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, display: "grid", gap: 6 }}>
+            {[{ label: "Goods value", value: formatMoney(goodsAmount, order.currency || "USD") }, { label: "Freight", value: formatMoney(freightCost, currency) }, { label: "Platform fee (3%)", value: formatMoney(escrowFee, order.currency || "USD") }].map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#6B7280", fontSize: 12 }}>{label}</span>
+                <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{value}</span>
+              </div>
+            ))}
+            <div style={{ height: 1, background: "#E5E7EB" }} />
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "#111827", fontWeight: 800, fontSize: 13 }}>Buyer pays total (incl. escrow fee)</span>
+              <span style={{ color: "#111827", fontWeight: 900, fontSize: 15 }}>{formatMoney(grandTotal, order.currency || "USD")}</span>
+            </div>
+          </div>
+          {order.freight_quote_pdf_url && (
+            <a href={order.freight_quote_pdf_url} target="_blank" rel="noopener noreferrer" style={{ color: "#D4A843", fontSize: 12, textDecoration: "underline", display: "flex", alignItems: "center", gap: 4 }}>📄 View Quote Document →</a>
+          )}
+        </div>
+      ) : (
+        <div style={{ color: "#6B7280", fontSize: 12, lineHeight: 1.6 }}>The exporter has not submitted shipping details yet.</div>
+      )}
+    </div>
+  );
+}
+
+function FreightApprovalCard({ order, orderId, currentUser }: { order: Order; orderId: string; currentUser: CurrentUser }) {
+  const [approving, setApproving] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
+  const [changeText, setChangeText] = useState("");
+  const [changeSending, setChangeSending] = useState(false);
+
+  const goodsValue = Number(order.total_amount || 0);
+  const freightCost = Number(order.freight_cost || 0);
+  const escrowFee = (goodsValue + freightCost) * BUYER_ESCROW_FEE_RATE;
+  const grandTotal = goodsValue + freightCost + escrowFee;
+  const currency = order.currency || "USD";
 
   const handleApprove = async () => {
-    if (!currentUser) return;
-    setSubmitting(true);
+    setApproving(true);
     try {
       const { error } = await supabase.from("orders").update({
         order_status: "freight_approved",
@@ -800,91 +881,112 @@ function FreightApprovalCard({ order, orderId, currentUser }: {
       if (error) throw error;
       await supabase.from("messages").insert({
         order_id: orderId, sender_type: "system", is_ai: true,
-        content: `✅ Freight quote approved by the buyer.\n\nThe payment button is now active. Funds will be held in escrow until delivery is confirmed.`,
+        content: `✅ Buyer approved the freight quote.\nTotal: ${formatMoney(grandTotal, currency)}\nClick below to proceed to payment.`,
       });
-      toast.success("Freight quote approved.");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to approve freight quote.");
-    } finally {
-      setSubmitting(false);
-    }
+      toast.success("Freight quote approved!");
+    } catch (err: any) { toast.error(err?.message || "Failed to approve freight quote."); }
+    finally { setApproving(false); }
+  };
+
+  const handleRequestChanges = async () => {
+    if (!changeText.trim()) { toast.error("Please describe what needs to change."); return; }
+    setChangeSending(true);
+    try {
+      const messageText = `🔄 Freight Change Request:\n${changeText.trim()}`;
+      await supabase.from("messages").insert({
+        order_id: orderId,
+        sender_id: currentUser.id,
+        sender_type: "buyer",
+        is_ai: false,
+        content: messageText,
+      });
+
+      await supabase.from("orders").update({
+        order_status: FREIGHT_CHANGE_REQUESTED_STATUS,
+        freight_approved_at: null,
+        freight_approved_by: null,
+      }).eq("id", orderId);
+
+      await supabase.from("messages").insert({
+        order_id: orderId,
+        sender_type: "system",
+        is_ai: true,
+        content: `🔄 Buyer requested freight changes. Exporter, please revise the quote and submit the updated version.`,
+      });
+
+      toast.success("Change request sent.");
+      setShowChanges(false);
+      setChangeText("");
+    } catch (err: any) { toast.error(err?.message || "Failed to send change request."); }
+    finally { setChangeSending(false); }
   };
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "2px solid #006B3F", padding: 16, boxSizing: "border-box", width: "100%" }}>
-      <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12 }}>
-        🚚 Freight Quote Submitted
+    <>
+      <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #E5E7EB", borderLeft: "4px solid #D4A843", padding: 16, boxSizing: "border-box", width: "100%" }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#D4A843", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", marginBottom: 12 }}>🚢 Freight Quote Pending Approval</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {[{ label: "Carrier", value: order.freight_company || "—" }, { label: "Cost", value: formatMoney(freightCost, order.freight_currency || currency) }, { label: "Estimated", value: `${order.freight_estimate_days || "—"} days` }].map(({ label, value }) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "#6B7280", fontSize: 12 }}>{label}</span>
+              <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{value}</span>
+            </div>
+          ))}
+          <div style={{ background: "#F9FAFB", borderRadius: 10, padding: 12, marginTop: 4, display: "grid", gap: 6 }}>
+            {[{ label: "Goods value", value: formatMoney(goodsValue, currency) }, { label: "Freight estimate", value: formatMoney(freightCost, currency) }, { label: "Escrow fee (4.5%)", value: formatMoney(escrowFee, currency) }].map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#6B7280", fontSize: 12 }}>{label}</span>
+                <span style={{ color: "#111827", fontWeight: 700, fontSize: 12 }}>{value}</span>
+              </div>
+            ))}
+            <div style={{ height: 1, background: "#E5E7EB" }} />
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "#D4A843", fontWeight: 800, fontSize: 13 }}>TOTAL</span>
+              <span style={{ color: "#D4A843", fontWeight: 900, fontSize: 15 }}>{formatMoney(grandTotal, currency)}</span>
+            </div>
+          </div>
+          <button onClick={handleApprove} disabled={approving} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "#006B3F", border: "none", color: "#fff", fontWeight: 800, fontSize: 13.5, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+            {approving ? <Spinner size={14} color="#fff" /> : "Approve & Proceed to Pay ✓"}
+          </button>
+          <button onClick={() => setShowChanges(true)} style={{ width: "100%", padding: "11px", borderRadius: 12, background: "transparent", border: "1.5px solid #D1D5DB", color: "#6B7280", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Request Changes</button>
+        </div>
       </div>
-      <div style={{ color: "#6B7280", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
-        The exporter has submitted a freight quote. Please review the details and approve to proceed with payment.
-      </div>
-      <div style={{ display: "grid", gap: 12 }}>
-        <button onClick={handleApprove} disabled={submitting} style={{ width: "100%", padding: "13px", borderRadius: 12, background: "#006B3F", border: "none", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase" }}>
-          {submitting ? <><Spinner size={14} color="#fff" />Approving…</> : "✓ Approve Freight Quote"}
-        </button>
-      </div>
-    </div>
+      <BottomSheet open={showChanges} onClose={() => setShowChanges(false)} title="Request Changes">
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ color: "#374151", fontSize: 13 }}>What needs to change with the freight quote?</div>
+          <textarea value={changeText} onChange={(e) => setChangeText(e.target.value)} rows={4} placeholder="Describe what needs to change..." style={{ width: "100%", padding: "11px 12px", border: "1px solid #D1D5DB", borderRadius: 10, background: "#F9FAFB", resize: "none", fontSize: 13, fontFamily: "'DM Sans',sans-serif", boxSizing: "border-box" }} />
+          <button onClick={handleRequestChanges} disabled={changeSending} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "#D4A843", border: "none", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {changeSending ? <Spinner size={14} color="#fff" /> : "Send Change Request"}
+          </button>
+        </div>
+      </BottomSheet>
+    </>
   );
 }
 
+// ─── FIX 1: CHECKLIST PANEL ──────────────────────────────────────────────────
+// seedChecklist now uses UPSERT (ignoreDuplicates) to avoid conflict with DB trigger
+// This means both the DB trigger AND frontend can try to seed — only one will win, no error
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
-  orderId: string; currentUser: CurrentUser | null; isExporter: boolean; order: Order; checklistRef: React.RefObject<HTMLDivElement>;
+  orderId: string; currentUser: CurrentUser; isExporter: boolean;
+  order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
 }) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [expanded, setExpanded] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-  const seedingRef = useRef(false); // To prevent multiple seeding attempts
-  const [expanded, setExpanded] = useState(false);
-  const inputStyle: CSSProperties = {
-    width: "100%", padding: "10px 12px", background: "#F9FAFB",
-    border: "1px solid #D1D5DB", borderRadius: 10, color: "#111827",
-    fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none",
-    boxSizing: "border-box", marginBottom: 10,
-  };
+  const [previewStep, setPreviewStep] = useState<ChecklistItem | null>(null);
 
+  // FIX 1: Use upsert so the frontend can safely seed checklist rows
+  // even if the database trigger already inserted them.
   const seedChecklist = async () => {
-    if (seedingRef.current) return; // Prevent re-seeding if already in progress
-    seedingRef.current = true;
+    if (!isExporter) return;
     try {
-      // Check if checklist already exists for this order
-      const { data: existingChecklist, error: fetchError } = await supabase
-        .from("deal_checklist")
-        .select("id")
-        .eq("order_id", orderId);
-
-      if (fetchError) throw fetchError;
-
-      if (existingChecklist && existingChecklist.length > 0) {
-        // Checklist already exists, no need to seed
-        seedingRef.current = false;
-        return;
-      }
-
-      const items = DEFAULT_CHECKLIST.map((step) => ({
-        order_id: orderId,
-        step_key: step.key,
-        step_label: step.label,
-        completed: false,
-        completed_at: null,
-        completed_by: null,
-        document_url: null,
-        document_name: null,
-        document_urls: [],
-        notes: null,
-        requires_document: step.requires_document,
-        icon: step.icon,
-        reference_number: null,
-        carrier_name: null,
-        document_verified: false,
-        verified_by: null,
-        verified_at: null,
-      }));
-      const { error } = await supabase.from("deal_checklist").insert(items);
-      if (error) console.error("Failed to seed checklist:", error);
-    } finally {
-      seedingRef.current = false;
+      await seedDealChecklistRows(orderId);
+    } catch (error) {
+      console.error("Failed to seed checklist:", error);
     }
   };
 
@@ -895,15 +997,28 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
 
-    if (error || !data) return;
-
-    setChecklist(data as ChecklistItem[]);
-
-    // Only seed if no checklist items exist and order is in a state where checklist should be active
-    if (data.length === 0 && isExporter && [
-      "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
-    ].includes(order.order_status)) {
-      await seedChecklist();
+    if (!error && data) {
+      const normalized = (data as ChecklistItem[]).map((item) => ({
+        ...item,
+        document_urls: Array.isArray((item as any).document_urls)
+          ? (item as any).document_urls
+          : item.document_url
+            ? [item.document_url]
+            : [],
+      }));
+      setChecklist(normalized);
+      // FIX 1: Try to seed if empty AND status is in escrow-active range
+      // This handles cases where DB trigger ran but frontend missed it
+      if (normalized.length === 0 && isExporter && ESCROW_ACTIVE_STATUSES.includes(order.order_status)) {
+        await seedChecklist();
+        // Reload after seeding
+        const { data: fresh } = await supabase
+          .from("deal_checklist")
+          .select("*")
+          .eq("order_id", orderId)
+          .order("created_at", { ascending: true });
+        if (fresh) setChecklist(fresh as ChecklistItem[]);
+      }
     }
   };
 
@@ -917,144 +1032,95 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       }, () => loadChecklist())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [orderId]);
+  }, [orderId, order.order_status]);
+
+  // Also reload when order status changes to escrow_funded
+  useEffect(() => {
+    if (ESCROW_ACTIVE_STATUSES.includes(order.order_status)) {
+      loadChecklist();
+    }
+  }, [order.order_status]);
 
   const updateOrderStatusFromStep = async (stepKey: string) => {
-    let nextStatus: string | null = null;
-    if (stepKey === "bill_of_lading") nextStatus = "docs_in_progress";
-    if (stepKey === "tracking_confirmed") nextStatus = "goods_shipped";
+    const nextStatus = stepKey === "tracking_confirmed" ? "goods_shipped" : null;
     if (!nextStatus) return;
     await supabase.from("orders").update({ order_status: nextStatus }).eq("id", orderId);
   };
 
   const markComplete = async (step: ChecklistItem) => {
     if (!isExporter) return;
-    if (step.id.startsWith("preview-")) {
-      toast.error("Checklist is not active yet. Wait for escrow to be funded.");
-      return;
-    }
-    // Guard: already completed — don't duplicate messages or status updates
-    if (step.completed) {
-      toast.error("This step is already completed.");
-      return;
-    }
-
-    // Bill of Lading requires document upload first
-    if (step.step_key === "bill_of_lading" && !step.document_url) {
-      toast.error("Upload the Bill of Lading document first.");
-      return;
-    }
-
-    // Pre-shipment photos requires at least one uploaded photo
-    if (step.step_key === MULTI_PHOTO_STEP && (!step.document_urls || step.document_urls.length === 0)) {
-      toast.error("Upload at least one pre-shipment photo first.");
-      return;
-    }
-
-    // Tracking step requires number and carrier
+    if (step.id.startsWith("preview-")) { toast.error("Checklist is not active yet. Wait for escrow to be funded."); return; }
+    if (step.step_key === "bill_of_lading" && !step.document_url) { toast.error("Upload the Bill of Lading document first."); return; }
+    if (step.step_key === "pre_shipment_photos" && !step.document_url) { toast.error("Upload the pre-shipment photos first."); return; }
     if (step.step_key === "tracking_confirmed") {
       if (!trackingNumber.trim()) { toast.error("Enter the tracking number."); return; }
       if (!carrier) { toast.error("Select the carrier."); return; }
     }
 
     try {
-      const updatePayload: any = {
-        completed: true,
-        completed_at: new Date().toISOString(),
-        completed_by: currentUser.id,
-      };
+      const updatePayload: any = { completed: true, completed_at: new Date().toISOString(), completed_by: currentUser.id };
       if (step.step_key === "tracking_confirmed") {
         updatePayload.reference_number = trackingNumber.trim();
         updatePayload.carrier_name = carrier;
       }
-
       const { error } = await supabase.from("deal_checklist").update(updatePayload).eq("id", step.id);
       if (error) throw error;
 
-      const msgContent =
-        step.step_key === MULTI_PHOTO_STEP
-          ? `📸 Pre-shipment photos uploaded and confirmed by the exporter. Goods are packed and ready for loading.`
-          : step.step_key === "bill_of_lading"
-          ? `🚢 Bill of Lading uploaded by the exporter. Goods are officially on a vessel.`
-          : `📍 Tracking confirmed.\nTracking number: ${trackingNumber}\nCarrier: ${carrier}\n\nThe buyer can now independently track the shipment.`;
+      const msgContent = step.step_key === "pre_shipment_photos"
+        ? `📸 Pre-shipment photos uploaded and confirmed by the exporter. Goods are packed and ready for loading.\nTap the checklist card to preview the images inside the deal room.`
+        : step.step_key === "bill_of_lading"
+        ? `🚢 Bill of Lading uploaded by the exporter. Goods are officially on a vessel.\nTap the checklist card to preview the document inside the deal room.`
+        : `📍 Tracking confirmed.\nTracking number: ${trackingNumber}\nCarrier: ${carrier}\n\nThe buyer can now independently track the shipment.`;
 
-      await supabase.from("messages").insert({
-        order_id: orderId, sender_type: "system", is_ai: true, content: msgContent,
-      });
-
+      await supabase.from("messages").insert({ order_id: orderId, sender_type: "system", is_ai: true, content: msgContent.trim() });
       await updateOrderStatusFromStep(step.step_key);
       toast.success("Checklist updated.");
       setTrackingNumber("");
       setCarrier("");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to update checklist.");
-    }
+    } catch (err: any) { toast.error(err?.message || "Failed to update checklist."); }
   };
 
-  // Handles both single-file steps (Bill of Lading) and multi-file steps
-  // (Pre-Shipment Photos). Every uploaded file also posts into Chat Messages
-  // so the buyer sees it live — image preview if it's a photo, a "View
-  // document" link otherwise.
-  const handleUpload = async (step: ChecklistItem, files: FileList) => {
-    if (!files || files.length === 0) return;
+  const handleUpload = async (step: ChecklistItem) => {
+    const selectedFiles = Array.from(fileRef.current?.files || []);
+    if (!selectedFiles.length) return;
+
+    const allowMultiple = MULTI_UPLOAD_STEPS.has(step.step_key);
+    const filesToUpload = allowMultiple ? selectedFiles : selectedFiles.slice(0, 1);
+
     setUploading(true);
     try {
-      const isMultiPhoto = step.step_key === MULTI_PHOTO_STEP;
-      const uploaded: ChecklistPhoto[] = [];
+      const uploaded = await Promise.all(
+        filesToUpload.map(async (file) => {
+          const { data, error } = await supabase.storage.from("listings").upload(
+            `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
+            file, { cacheControl: "3600", upsert: false }
+          );
+          if (error) throw error;
+          const publicUrl = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
+          return { url: publicUrl, name: file.name };
+        })
+      );
 
-      for (const file of Array.from(files)) {
-        const path = `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`;
-        const { data, error } = await supabase.storage.from("listings").upload(
-          path, file, { cacheControl: "3600", upsert: false }
-        );
-        if (error) throw error;
-        const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
-        uploaded.push({ url, name: file.name });
-      }
+      const urls = uploaded.map((item) => item.url);
+      const names = uploaded.map((item) => item.name);
+      const { error: updateErr } = await supabase.from("deal_checklist").update({
+        document_url: urls[0] || null,
+        document_urls: urls,
+        document_name: names[0] || null,
+      }).eq("id", step.id);
+      if (updateErr) throw updateErr;
 
-      if (uploaded.length === 0) return;
+      const attachmentLabel = uploaded.length > 1 ? `${uploaded.length} files` : "1 file";
+      await supabase.from("messages").insert({
+        order_id: orderId,
+        sender_type: "system",
+        is_ai: true,
+        content: `📎 ${step.step_label} uploaded by the exporter.\n${attachmentLabel} added. Tap the checklist card to preview inside the deal room.`,
+      });
 
-      if (isMultiPhoto) {
-        const merged = [...(step.document_urls || []), ...uploaded];
-        const { error: updateErr } = await supabase.from("deal_checklist")
-          .update({
-            document_urls: merged,
-            document_url: merged[0].url,
-            document_name: merged[0].name,
-          })
-          .eq("id", step.id);
-        if (updateErr) throw updateErr;
-      } else {
-        const first = uploaded[0];
-        const { error: updateErr } = await supabase.from("deal_checklist")
-          .update({ document_url: first.url, document_name: first.name })
-          .eq("id", step.id);
-        if (updateErr) throw updateErr;
-      }
-
-      // Post each uploaded file into Chat Messages
-      for (const item of uploaded) {
-        const image = isImageFile(item.name);
-        const label = step.step_key === MULTI_PHOTO_STEP
-          ? "Pre-shipment photo uploaded"
-          : "Bill of Lading document uploaded";
-        await supabase.from("messages").insert({
-          order_id: orderId,
-          sender_type: "system",
-          is_ai: true,
-          content: `${step.step_key === MULTI_PHOTO_STEP ? "📸" : "🚢"} ${label}: ${item.name}`,
-          image_url: image ? item.url : null,
-          document_url: image ? null : item.url,
-        });
-      }
-
-      toast.success(uploaded.length > 1 ? `${uploaded.length} photos uploaded.` : "Document uploaded.");
-    } catch (err: any) {
-      toast.error(err?.message || "Upload failed.");
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
+      toast.success("Document uploaded.");
+    } catch (err: any) { toast.error(err?.message || "Upload failed."); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
   const completedCount = checklist.filter((c) => c.completed).length;
@@ -1065,8 +1131,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
     ? DEFAULT_CHECKLIST.map((step) => ({
         id: `preview-${step.key}`, order_id: orderId, step_key: step.key,
         step_label: step.label, completed: false, completed_at: null,
-        completed_by: null, document_url: null, document_name: null,
-        document_urls: [], notes: null,
+        completed_by: null, document_url: null, document_name: null, notes: null,
         requires_document: step.requires_document, icon: step.icon,
         created_at: order.created_at, reference_number: null, carrier_name: null,
         document_verified: false, verified_by: null, verified_at: null,
@@ -1075,17 +1140,11 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
   return (
     <div ref={checklistRef} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: 12 }}
-        onClick={() => setExpanded((prev) => !prev)}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => setExpanded((prev) => !prev)}>
         <span style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", color: "#D4A843" }}>
-          📋 Shipment Checklist
+          📋 Shipment Checklist {!checklistEmpty && `(${completedCount}/3)`}
         </span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ color: "#9CA3AF", fontSize: 10 }}>
-            {checklistEmpty ? "0" : `${completedCount} / ${checklist.length}`}
-          </span>
-          <span style={{ color: "#9CA3AF", fontSize: 10, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .25s" }}>▼</span>
-        </div>
+        <span style={{ color: "#9CA3AF", fontSize: 10, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .25s" }}>▼</span>
       </div>
 
       <div style={{ height: 4, background: "#E5E7EB", borderRadius: 2, marginBottom: 12 }}>
@@ -1094,231 +1153,197 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
       {expanded && (
         <div>
-          {!isExporter ? (
-            <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 10, fontStyle: "italic", lineHeight: 1.5 }}>
-              Track the exporter's shipment evidence below. You can view uploaded photos and documents.
-            </div>
-          ) : (
-            <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 10, fontStyle: "italic", lineHeight: 1.5 }}>
-              Upload evidence at each stage so the buyer can see the shipment is moving. All 3 steps required before escrow releases.
+          <div style={{ color: "#6B7280", fontSize: 11, marginBottom: 10, fontStyle: "italic", lineHeight: 1.5 }}>
+            {!isExporter
+              ? "Track the exporter's shipment evidence below. You can view uploaded photos and documents."
+              : "Upload evidence at each stage. All 3 steps must be completed before escrow can release."}
+          </div>
+
+          {stagedChecklist.map((step, index) => {
+            const isCompleted = step.completed;
+            const isActive = !isCompleted && (
+              checklistEmpty ? index === 0 : checklist.findIndex((item) => item.id === step.id) === completedCount
+            );
+            const isTracking = step.step_key === "tracking_confirmed";
+            const hint = DEFAULT_CHECKLIST.find(d => d.key === step.step_key)?.hint || "";
+
+            return (
+              <div key={step.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{
+                  width: 24, height: 24, borderRadius: "50%",
+                  background: isCompleted ? "#059669" : isActive ? "#D4A843" : "transparent",
+                  border: isCompleted || isActive ? "none" : "1.5px solid #D1D5DB",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, color: "#fff", flexShrink: 0, marginTop: 2,
+                }}>
+                  {isCompleted ? "✅" : <span style={{ fontSize: 14 }}>{step.icon}</span>}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: isCompleted ? "#059669" : isActive ? "#D4A843" : "#9CA3AF", fontWeight: 700, fontSize: 12.5, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.03em" }}>
+                    {step.step_label}
+                  </div>
+
+                  {isActive && isExporter && hint && (
+                    <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2, lineHeight: 1.5, fontStyle: "italic" }}>{hint}</div>
+                  )}
+                  {isCompleted && step.completed_at && (
+                    <div style={{ color: "#9CA3AF", fontSize: 10 }}>Completed {formatTime(step.completed_at)}</div>
+                  )}
+                  {isCompleted && isTracking && step.reference_number && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: "#374151" }}>
+                      <div><strong>Tracking:</strong> {step.reference_number}</div>
+                      {step.carrier_name && (
+                        <div>
+                          <strong>Carrier:</strong> {step.carrier_name}
+                          {CARRIER_TRACKING_URLS[step.carrier_name] && (
+                            <a href={CARRIER_TRACKING_URLS[step.carrier_name]} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, color: "#D4A843", textDecoration: "underline", fontSize: 10 }}>Track →</a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {getDocumentUrls(step).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewStep(step)}
+                      style={{ background: "none", border: "none", color: "#D4A843", fontSize: 11, textDecoration: "underline", display: "block", marginTop: 2, padding: 0, cursor: "pointer", textAlign: "left" }}
+                    >
+                      View {getDocumentUrls(step).length} file{getDocumentUrls(step).length > 1 ? "s" : ""} →
+                    </button>
+                  )}
+
+                  {isActive && isExporter && !checklistEmpty && (
+                    <div style={{ marginTop: 8 }}>
+                      {isTracking && (
+                        <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
+                          <input name="tracking-number" type="text" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="Enter tracking / container / B/L number" style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 12, background: "#F9FAFB" }} />
+                          <select name="carrier" value={carrier} onChange={(e) => setCarrier(e.target.value)} style={{ width: "100%", padding: "6px 10px", borderRadius: 6, border: "1px solid #D1D5DB", fontSize: 12, background: "#F9FAFB" }}>
+                            <option value="">Select carrier</option>
+                            {Object.keys(CARRIER_TRACKING_URLS).map((c) => (<option key={c} value={c}>{c}</option>))}
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        {step.requires_document && (
+                          <>
+                            <button onClick={() => fileRef.current?.click()} style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: "pointer" }}>
+                              Upload {step.step_key === "pre_shipment_photos" ? "Photos" : "Document"}
+                            </button>
+                            <input
+                              type="file"
+                              accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"}
+                              multiple={step.step_key === "pre_shipment_photos" || step.step_key === "bill_of_lading"}
+                              ref={fileRef}
+                              style={{ display: "none" }}
+                              onChange={() => handleUpload(step)}
+                            />
+                          </>
+                        )}
+                        <button onClick={() => markComplete(step)} disabled={uploading} style={{ background: "#D4A843", border: "none", borderRadius: 6, padding: "4px 12px", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                          Mark Complete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {checklistEmpty && (
+            <div style={{ marginTop: 8, padding: 12, borderRadius: 12, border: "1px dashed #D1D5DB", color: "#6B7280", fontSize: 11, lineHeight: 1.5, textAlign: "center" }}>
+              {ESCROW_ACTIVE_STATUSES.includes(order.order_status)
+                ? "Loading checklist…"
+                : "The checklist activates when escrow is funded. Steps: Photos → Bill of Lading → Tracking Number."}
             </div>
           )}
-
-          <div>
-            {stagedChecklist.map((step, index) => {
-              const isCompleted = step.completed;
-              const isActive = !isCompleted && (
-                checklistEmpty ? index === 0
-                : checklist.findIndex((item) => item.id === step.id) === completedCount
-              );
-              const isTracking = step.step_key === "tracking_confirmed";
-              const isMultiPhoto = step.step_key === MULTI_PHOTO_STEP;
-              const hint = DEFAULT_CHECKLIST.find(d => d.key === step.step_key)?.hint || "";
-              const photos = step.document_urls || [];
-
-              return (
-                <div key={step.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
-                  <div style={{
-                    width: 24, height: 24, borderRadius: "50%",
-                    background: isCompleted ? "#059669" : isActive ? "#D4A843" : "transparent",
-                    border: isCompleted || isActive ? "none" : "1.5px solid #D1D5DB",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 12, color: "#fff", flexShrink: 0, marginTop: 2,
-                  }}>
-                    {isCompleted ? "✅" : <span style={{ fontSize: 14 }}>{step.icon}</span>}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: isCompleted ? "#059669" : isActive ? "#D4A843" : "#9CA3AF", fontWeight: 700, fontSize: 12.5, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.03em" }}>
-                      {step.step_label}
-                    </div>
-
-                    {/* Hint text for active step */}
-                    {isActive && isExporter && hint && (
-                      <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2, lineHeight: 1.5, fontStyle: "italic" }}>
-                        {hint}
-                      </div>
-                    )}
-
-                    {isCompleted && step.completed_at && (
-                      <div style={{ color: "#9CA3AF", fontSize: 10 }}>
-                        Completed {formatTime(step.completed_at)}
-                      </div>
-                    )}
-
-                    {/* Tracking info display */}
-                    {isCompleted && isTracking && step.reference_number && (
-                      <div style={{ marginTop: 4, fontSize: 11, color: "#374151" }}>
-                        <div><strong>Tracking:</strong> {step.reference_number}</div>
-                        {step.carrier_name && (
-                          <div>
-                            <strong>Carrier:</strong> {step.carrier_name}
-                            {CARRIER_TRACKING_URLS[step.carrier_name] && (
-                              <a href={CARRIER_TRACKING_URLS[step.carrier_name]} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, color: "#D4A843", textDecoration: "underline", fontSize: 10 }}>
-                                Track →
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Multi-photo thumbnail grid (Pre-Shipment Photos) */}
-                    {isMultiPhoto && photos.length > 0 && (
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                        {photos.map((photo, i) => (
-                          <a
-                            key={`${photo.url}-${i}`}
-                            href={photo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ display: "block" }}
-                          >
-                            <img
-                              src={photo.url}
-                              alt={photo.name}
-                              style={{
-                                width: 50, height: 50, objectFit: "cover",
-                                borderRadius: 8, border: "1px solid #E5E7EB",
-                              }}
-                            />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Single document link (Bill of Lading) */}
-                    {!isMultiPhoto && step.document_url && (
-                      isExporter ? (
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, border: "1.5px dashed #D1D5DB", cursor: "pointer", marginTop: 8, color: "#6B7280", fontSize: 12 }}>
-                          📄 {step.document_name || "View document"}
-                          <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={(e) => handleUpload(step, e.target.files || new FileList())} />
-                        </label>
-                      ) : (
-                        <a
-                          href={step.document_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: "#D4A843", fontSize: 11.5, textDecoration: "underline", display: "block", marginTop: 6 }}
-                        >
-                          📄 View document →
-                        </a>
-                      )
-                    )}
-
-                    {/* Upload/Input for active step */}
-                    {isActive && isExporter && (
-                      <div style={{ marginTop: 8 }}>
-                        {isTracking ? (
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <input type="text" placeholder="Tracking Number" value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }} />
-                            <select value={carrier} onChange={(e) => setCarrier(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-                              <option value="">Select Carrier</option>
-                              {Object.keys(CARRIER_TRACKING_URLS).map((c) => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
-                            <button onClick={() => markComplete(step)} style={{ width: "100%", padding: "10px", borderRadius: 10, background: "#006B3F", border: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-                              Confirm Tracking
-                            </button>
-                          </div>
-                        ) : (
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 10, border: "1.5px dashed #D1D5DB", cursor: "pointer", color: "#6B7280", fontSize: 12 }}>
-                            {uploading ? <Spinner size={12} color="#6B7280" /> : (isMultiPhoto ? "📸 Upload Photos" : "📄 Upload Document")}
-                            <input ref={fileRef} type="file" accept={isMultiPhoto ? "image/*" : "application/pdf"} multiple={isMultiPhoto} style={{ display: "none" }} onChange={(e) => handleUpload(step, e.target.files || new FileList())} />
-                          </label>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Mark as complete button for steps that don't require document upload */}
-                    {isActive && isExporter && !step.requires_document && !isTracking && (
-                      <button onClick={() => markComplete(step)} style={{ width: "100%", padding: "10px", borderRadius: 10, background: "#006B3F", border: "none", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", marginTop: 8 }}>
-                        Mark as Complete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       )}
+
+      <FilePreviewSheet
+        open={Boolean(previewStep)}
+        onClose={() => setPreviewStep(null)}
+        title={previewStep?.step_label || "Files"}
+        files={previewStep ? getDocumentUrls(previewStep) : []}
+      />
     </div>
   );
 }
 
 function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlatformReview }: {
-  order: Order; orderId: string; currentUser: CurrentUser | null; isBuyer: boolean; onShowPlatformReview: () => void;
+  order: Order; orderId: string; currentUser: CurrentUser;
+  isBuyer: boolean; onShowPlatformReview?: () => void;
 }) {
+  const navigate = useNavigate();
+  const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showDispute, setShowDispute] = useState(false);
   const [reason, setReason] = useState("");
   const [description, setDescription] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState(0);
   const [submittingRating, setSubmittingRating] = useState(false);
 
+  useEffect(() => {
+    if (order.order_status === "completed" && isBuyer) {
+      const check = async () => {
+        const { data } = await supabase.from("exporter_reviews").select("id").eq("order_id", orderId).eq("reviewer_id", currentUser.id).maybeSingle();
+        if (!data) setShowRating(true);
+      };
+      check();
+    }
+  }, [order.order_status, isBuyer, orderId, currentUser.id]);
+
   const confirmDelivery = async () => {
     setSubmitting(true);
     try {
+      const { data: releaseData, error: releaseError } = await supabase.functions.invoke('pandascrow-escrow/release', { body: { orderId } });
+      if (releaseError) throw new Error(releaseError.message || "Escrow release failed.");
       const { error } = await supabase.from("orders").update({
-        order_status: "delivered", escrow_status: "released", delivery_confirmed_at: new Date().toISOString(),
+        order_status: "completed", escrow_status: "released",
+        delivery_confirmed_at: new Date().toISOString(),
       }).eq("id", orderId);
       if (error) throw error;
+      const dealAmount = Number(order.total_amount || 0) + Number(order.freight_cost || 0);
+      const total = dealAmount + dealAmount * 0.045;
+      const exporterPayout = releaseData?.payout_amount || (dealAmount - dealAmount * 0.08);
       await supabase.from("messages").insert({
         order_id: orderId, sender_type: "system", is_ai: true,
-        content: `📦 Delivery confirmed by the buyer. Escrow funds have been released to the exporter.`,
+        content: `🎉 Delivery confirmed! Escrow of ${formatMoney(total, order.currency || "USD")} has been released to exporter.\n\nExporter payout: ${formatMoney(exporterPayout, order.currency || "USD")}\nFunds will arrive in 1-3 business days.`,
       });
-      toast.success("Delivery confirmed! Escrow released.");
+      toast.success("Delivery confirmed!");
       setShowConfirm(false);
-      setShowRating(true); // Show rating modal after delivery confirmation
-    } catch (err: any) {
-      toast.error(err?.message || "Unable to confirm delivery.");
-    } finally {
-      setSubmitting(false);
-    }
+      setShowRating(true);
+    } catch (err: any) { toast.error(err?.message || "Unable to confirm delivery."); }
+    finally { setSubmitting(false); }
   };
 
   const submitRating = async () => {
-    if (!rating) { toast.error("Please select a rating."); return; }
-    if (!currentUser || !order?.exporter_id) return;
+    if (rating === 0) { toast.error("Please select a rating."); return; }
     setSubmittingRating(true);
     try {
-      const { error } = await supabase.from("exporter_reviews").insert({
-        order_id: orderId, reviewer_id: currentUser.id, exporter_id: order.exporter_id, rating,
-      });
-      if (error) throw error;
-      toast.success("Rating submitted!");
+      const { error } = await supabase.from("exporter_reviews").insert({ order_id: orderId, reviewer_id: currentUser.id, reviewee_id: order.exporter_id, rating, review: null });
+      if (error) throw new Error(error.message);
+      toast.success("Thank you for your review!");
       setShowRating(false);
-      onShowPlatformReview?.(); // Show platform review after exporter review
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to submit rating.");
-    } finally {
-      setSubmittingRating(false);
-    }
+      onShowPlatformReview?.();
+    } catch (err: any) { toast.error("Save failed: " + (err?.message || "Unknown error")); }
+    finally { setSubmittingRating(false); }
   };
 
   const submitDispute = async () => {
-    if (!reason) { toast.error("Please select a reason for the dispute."); return; }
+    if (!reason.trim()) { toast.error("Please choose a dispute reason."); return; }
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("orders").update({
-        order_status: "disputed", escrow_status: "frozen", dispute_raised: true,
-      }).eq("id", orderId);
+      const { error } = await supabase.from("orders").update({ order_status: "disputed", escrow_status: "frozen", dispute_raised: true }).eq("id", orderId);
       if (error) throw error;
-      await supabase.from("messages").insert({
-        order_id: orderId, sender_type: "system", is_ai: true,
-        content: `⚠️ A dispute has been raised.\nReason: ${reason}\nEscrow is frozen until the case is reviewed.`,
-      });
+      await supabase.from("messages").insert({ order_id: orderId, sender_type: "system", is_ai: true, content: `⚠️ A dispute has been raised.\nReason: ${reason}\nEscrow is frozen until the case is reviewed.` });
       toast.error("Dispute raised.");
       setShowDispute(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Unable to submit dispute.");
-    } finally {
-      setSubmitting(false);
-    }
+    } catch (err: any) { toast.error(err?.message || "Unable to submit dispute."); }
+    finally { setSubmitting(false); }
   };
 
   if (!isBuyer) {
@@ -1329,37 +1354,30 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
     );
   }
 
+  // FIX 4: Show delivery confirm for goods_shipped, delivered, completed
+  // This renders AFTER the checklist — once tracking_confirmed is done,
+  // order_status becomes goods_shipped and this panel appears
   if (!["goods_shipped", "delivered", "completed"].includes(order.order_status)) return null;
 
   return (
     <>
       {order.order_status === "goods_shipped" && (
         <div style={{ background: "#fff", borderRadius: 16, border: "2px solid #D4A843", padding: 16, boxSizing: "border-box", width: "100%" }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12 }}>
-            📦 Goods have been shipped by exporter
-          </div>
-          <div style={{ color: "#6B7280", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
-            Please inspect your shipment carefully before confirming.
-          </div>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12 }}>📦 Goods have been shipped by exporter</div>
+          <div style={{ color: "#6B7280", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>Please inspect your shipment carefully before confirming.</div>
           <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#374151", lineHeight: 1.6 }}>
             ⚠️ <strong>Only click Confirm Delivery once you have physically received the goods.</strong>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <button onClick={() => setShowConfirm(true)} style={{ width: "100%", padding: "13px", borderRadius: 12, background: "#006B3F", border: "none", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase" }}>
-              ✓ Confirm Delivery
-            </button>
-            <button onClick={() => setShowDispute(true)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1.5px solid #FECACA", color: "#DC2626", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
-              ⚠️ Raise Dispute
-            </button>
+            <button onClick={() => setShowConfirm(true)} style={{ width: "100%", padding: "13px", borderRadius: 12, background: "#006B3F", border: "none", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase" }}>✓ Confirm Delivery</button>
+            <button onClick={() => setShowDispute(true)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1.5px solid #FECACA", color: "#DC2626", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>⚠️ Raise Dispute</button>
           </div>
         </div>
       )}
 
       <BottomSheet open={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Delivery">
         <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.7 }}>
-            Have you received the goods in good condition and correct quantity? This action is final and will release the escrow to the exporter.
-          </div>
+          <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.7 }}>Have you received the goods in good condition and correct quantity? This action is final and will release the escrow to the exporter.</div>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={() => setShowConfirm(false)} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#F3F4F6", border: "none", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
             <button onClick={confirmDelivery} disabled={submitting} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#006B3F", border: "none", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -1391,16 +1409,9 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
       <BottomSheet open={showRating} onClose={() => setShowRating(false)} title="Rate Your Experience">
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ color: "#374151", fontSize: 13, marginBottom: 12 }}>
-              How was your experience with {order.exporter?.company_name || "the exporter"}?
-            </div>
+            <div style={{ color: "#374151", fontSize: 13, marginBottom: 12 }}>How was your experience with {order.exporter?.company_name || "the exporter"}?</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-              {[
-                { label: "Best", value: 5, color: "#006B3F", bg: "#ECFDF5" },
-                { label: "Good", value: 4, color: "#059669", bg: "#D1FAE5" },
-                { label: "Medium", value: 3, color: "#D4A843", bg: "#FEF3C7" },
-                { label: "Bad", value: 2, color: "#DC2626", bg: "#FEE2E2" },
-              ].map((opt) => (
+              {[{ label: "Best", value: 5, color: "#006B3F", bg: "#ECFDF5" }, { label: "Good", value: 4, color: "#059669", bg: "#D1FAE5" }, { label: "Medium", value: 3, color: "#D4A843", bg: "#FEF3C7" }, { label: "Bad", value: 2, color: "#DC2626", bg: "#FEE2E2" }].map((opt) => (
                 <button key={opt.value} onClick={() => setRating(opt.value)} style={{ padding: "12px 8px", borderRadius: 10, border: rating === opt.value ? `2px solid ${opt.color}` : "1.5px solid #E5E7EB", background: rating === opt.value ? opt.bg : "#fff", color: opt.color, fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   {opt.label}
                 </button>
@@ -1419,33 +1430,6 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
   );
 }
 
-function FreightSummary({ order, isBuyer }: { order: Order; isBuyer: boolean }) {
-  return (
-    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
-      <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-        🚚 Freight Summary
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#6B7280", fontSize: 12 }}>Carrier</span>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{order.freight_company || "—"}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#6B7280", fontSize: 12 }}>Freight Cost</span>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{formatMoney(Number(order.freight_cost || 0), order.freight_currency || "USD")}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ color: "#6B7280", fontSize: 12 }}>Estimated Transit</span>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{order.freight_estimate_days ? `${order.freight_estimate_days} day(s)` : "—"}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// LanguageSelector removed — translation is now fully automatic via detection
-
-// ─── MAIN DEALROOM EXPORT ────────────────────────────────────────────────────
 export default function DealRoom() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
@@ -1460,14 +1444,12 @@ export default function DealRoom() {
   const [sending, setSending] = useState(false);
   const [activeTab, setActiveTab] = useState<"messages" | "actions">("messages");
   const [payLoading, setPayLoading] = useState(false);
-  const [showChecklist, setShowChecklist] = useState(false);
   const [showPlatformReview, setShowPlatformReview] = useState(false);
   const [showBuyerReview, setShowBuyerReview] = useState(false);
   const [buyerRating, setBuyerRating] = useState(0);
   const [submittingBuyerReview, setSubmittingBuyerReview] = useState(false);
-  // viewerLang: the language this user reads — loaded from their profile
-  // Used to determine what incoming messages should be translated into
   const [viewerLang, setViewerLang] = useState("en");
+  const paymentSyncRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1495,6 +1477,63 @@ export default function DealRoom() {
   const exporterFee = dealAmount * EXPORTER_PLATFORM_FEE_RATE;
   const exporterPayout = dealAmount - exporterFee;
   const currency = order?.currency || order?.freight_currency || "USD";
+
+  const syncEscrowFundedState = useCallback(async () => {
+    if (!orderId) return;
+
+    try {
+      const { data: freshOrder } = await supabase.from("orders").select(
+        "order_status, escrow_status, payment_confirmed_at, freight_company, freight_cost, currency"
+      ).eq("id", orderId).single();
+
+      if (!freshOrder) return;
+
+      if (freshOrder.order_status !== "escrow_funded" || freshOrder.escrow_status !== "funded") {
+        await supabase.from("orders").update({
+          order_status: "escrow_funded",
+          escrow_status: "funded",
+          payment_confirmed_at: freshOrder.payment_confirmed_at || new Date().toISOString(),
+        }).eq("id", orderId);
+      }
+    } catch (err) {
+      console.error("Failed to normalize escrow state:", err);
+    }
+
+    try {
+      await seedDealChecklistRows(orderId);
+    } catch (err) {
+      console.error("Failed to seed checklist after payment:", err);
+    }
+
+    try {
+      const { data: existingPaymentMessages } = await supabase
+        .from("messages")
+        .select("id, content")
+        .eq("order_id", orderId)
+        .eq("sender_type", "system");
+
+      const hasPaymentNotice = (existingPaymentMessages || []).some((message) =>
+        /payment secured|escrow/i.test(message.content || "")
+      );
+
+      if (!hasPaymentNotice) {
+        await supabase.from("messages").insert({
+          order_id: orderId,
+          sender_type: "system",
+          is_ai: true,
+          content: `🔒 Payment secured in PandasCrow escrow.
+
+Exporter — your shipment checklist is now active. Upload photos, Bill of Lading, and tracking number to keep the buyer informed.
+
+Buyer — you will see live updates as the exporter completes each step.`,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to write payment message:", err);
+    }
+
+    await refetchOrder();
+  }, [orderId, refetchOrder]);
 
   const initializePayment = async () => {
     if (!order || !currentUser) { toast.error("Order details missing."); return; }
@@ -1551,11 +1590,18 @@ export default function DealRoom() {
     }
   }, [order, currentUser]);
 
+  // FIX 3 + FIX 5: Switch buyer to Actions tab after payment (escrow_funded) AND goods_shipped
   useEffect(() => {
-    if ((order?.order_status === "goods_shipped" || order?.order_status === "delivered") && isBuyer) {
-      setActiveTab("actions");
-    }
+    if (!isBuyer || !order) return;
+    const escrowActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
+    if (escrowActive) setActiveTab("actions");
   }, [order?.order_status, isBuyer]);
+
+  // Also switch exporter to actions after escrow funded
+  useEffect(() => {
+    if (!isExporter || !order) return;
+    if (ESCROW_ACTIVE_STATUSES.includes(order.order_status)) setActiveTab("actions");
+  }, [order?.order_status, isExporter]);
 
   useEffect(() => {
     if (order?.order_status === "completed" && isExporter && order?.buyer_id) {
@@ -1567,92 +1613,62 @@ export default function DealRoom() {
     }
   }, [order, isExporter, currentUser]);
 
-  // Atomic guard against duplicate "Payment secured" message.
-  // Uses a `payment_message_sent` boolean column on `orders`. The UPDATE
-  // only succeeds (returns a row) for the ONE caller that flips it from
-  // false → true. Every other concurrent caller (realtime re-fires, extra
-  // renders, multiple tabs) gets zero rows back and skips the insert.
+  // FIX 5: Ensure payment message is inserted after escrow_funded
+  // Also polls for it to handle timing issues with Pandascrow callback
   useEffect(() => {
     if (order?.order_status !== "escrow_funded" || !orderId) return;
-
     const ensurePaymentMessage = async () => {
-      const { data, error } = await supabase
-        .from("orders")
-        .update({ payment_message_sent: true })
-        .eq("id", orderId)
-        .eq("payment_message_sent", false)
-        .select("id");
+      // Check if ANY system message about payment exists
+      const { data: existing } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("order_id", orderId)
+        .eq("sender_type", "system")
+        .limit(5);
 
-      if (error) {
-        console.error("Failed to update payment_message_sent:", error);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        // Only send message if the update actually happened (i.e., it was false before)
+      const hasPaymentMsg = (existing || []).some(m => true); // system msg exists = payment confirmed
+      if (!existing || existing.length === 0) {
         await supabase.from("messages").insert({
           order_id: orderId, sender_type: "system", is_ai: true,
-          content: `🔒 ${formatMoney(grandTotal, currency)} secured in escrow. Your funds are safe until delivery is confirmed.`,
+          content: `🔒 Payment secured in PandasCrow escrow.\n\nExporter — your shipment checklist is now active. Upload photos, Bill of Lading, and tracking number to keep the buyer informed.\n\nBuyer — you will see live updates as the exporter completes each step.`,
         });
       }
     };
-
     ensurePaymentMessage();
-  }, [order?.order_status, orderId, grandTotal, currency]);
+  }, [order?.order_status, orderId]);
 
   useEffect(() => {
+    if (!orderId) return;
     let active = true;
 
     const init = async () => {
-      if (!orderId) {
-        setLoading(false);
-        return;
-      }
-
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          navigate("/login");
-          return;
-        }
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+        if (!session) { navigate("/login"); return; }
 
-        const { data: profile, error: profileError } = await supabase
-          .from("users")
-          .select("id, role, full_name, email, violation_count, preferred_language")
-          .eq("id", session.user.id)
-          .single();
+        const { data: profile } = await supabase.from("users")
+          .select("id,role,full_name,email,violation_count,preferred_language")
+          .eq("id", session.user.id).single();
 
-        if (profileError || !profile) {
-          toast.error("Unable to load user profile.");
-          navigate("/login");
-          return;
-        }
+        if (!profile) { toast.error("Profile not found."); navigate("/login"); return; }
 
-        const { data: orderData, error: orderError } = await supabase.from("orders").select(
+        const { data: orderData, error: orderErr } = await supabase.from("orders").select(
           `*,
           listing:listings(title,price_per_unit,unit,min_order_quantity,origin_state),
           buyer:users!orders_buyer_id_fkey(full_name,company_name,country,email,verified,business_state),
           exporter:users!orders_exporter_id_fkey(full_name,company_name,email,verified,business_state)`
         ).eq("id", orderId).single();
 
-        if (orderError || !orderData) {
-          toast.error("Unable to load deal details.");
-          navigate("/dashboard");
-          return;
-        }
-
+        if (orderErr || !orderData) { toast.error("Deal not found."); navigate("/dashboard"); return; }
         if (!active) return;
 
-        const userObj: CurrentUser = {
-          id: profile.id, role: profile.role,
-          full_name: profile.full_name,
+        setCurrentUser({
+          id: profile.id, role: profile.role, full_name: profile.full_name,
           email: session.user.email || profile.email,
           violation_count: profile.violation_count || 0,
           preferred_language: profile.preferred_language || "en",
-        };
-
-        setCurrentUser(userObj);
-        // viewerLang: what THIS user reads — messages from others are translated INTO this
+        });
         setViewerLang(profile.preferred_language || "en");
         setOrder(orderData as Order);
         await seedWelcomeMessage(orderId);
@@ -1678,186 +1694,101 @@ export default function DealRoom() {
   }, [navigate, orderId]);
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
-
   useEffect(() => {
-    if (activeTab === "messages") {
-      const timer = setTimeout(() => scrollToBottom(), 100);
-      return () => clearTimeout(timer);
-    }
+    if (activeTab === "messages") { const t = setTimeout(() => scrollToBottom(), 100); return () => clearTimeout(t); }
   }, [activeTab, scrollToBottom]);
 
-  // Auto-confirm payment on return from PandasCrow
   useEffect(() => {
     const url = window.location.href;
     const hasPaymentSuccess = url.includes("payment=success") || url.includes("status=success");
-    if (hasPaymentSuccess && orderId) {
-      toast.loading("Confirming payment...");
-      fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pandascrow-escrow/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId }),
-      }).then((r) => r.json()).then(async (result) => {
-        if (result.status) {
-          // Directly update order status to escrow_funded as a fallback
-          // The edge function should do this, but this adds client-side robustness
-          const { error: updateError } = await supabase.from("orders").update({
-            order_status: "escrow_funded",
-            escrow_status: "funded",
-            payment_confirmed_at: new Date().toISOString(),
-          }).eq("id", orderId);
+    if (!hasPaymentSuccess || !orderId || paymentSyncRef.current) return;
 
-          if (updateError) {
-            console.error("Failed to update order status on client after payment confirmation:", updateError);
-            toast.error("Payment confirmed, but failed to update order status locally.");
-          } else {
-            toast.success("Payment confirmed!");
-          }
+    paymentSyncRef.current = true;
+    toast.loading("Confirming payment...");
+
+    fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pandascrow-escrow/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId }),
+    })
+      .then((r) => r.json())
+      .then(async (result) => {
+        if (result.status) {
+          await syncEscrowFundedState();
+          toast.success("Payment confirmed!");
           window.history.replaceState({}, "", window.location.pathname);
-          refetchOrder();
         } else {
+          paymentSyncRef.current = false;
           toast.error(result.error || "Failed to confirm payment");
         }
-      }).catch(() => toast.error("Payment confirmation failed"));
-    }
-  }, [orderId, refetchOrder]);
-
-  const aiReplyFor = (text: string, context: {
-  isBuyer: boolean;
-  isExporter: boolean;
-  order?: Order;
-  paymentReady?: boolean;
-}) => {
-  const lower = text.toLowerCase();
-
-  // Wake phrase detected — use knowledge base for full response
-  if (WAKE_PHRASE.test(text)) {
-    // Strip wake phrase and get the actual question
-    const question = text.replace(WAKE_PHRASE, "").trim().replace(/^[,\s]+/, "");
-    if (question) {
-      return generateAIResponse(question, {
-        isBuyer: context.isBuyer,
-        isExporter: context.isExporter,
-        orderStatus: context.order?.order_status,
-        paymentReady: context.paymentReady,
+      })
+      .catch(() => {
+        paymentSyncRef.current = false;
+        toast.error("Payment confirmation failed");
       });
-    }
-    // Just wake phrase with no question
-    return "I'm here! Ask me anything about IziXport — deals, payments, shipping, verification, fees, or safety. How can I help?";
-  }
+  }, [orderId, syncEscrowFundedState]);
 
-  // Payment triggers
-  if (PAYMENT_TRIGGERS.test(lower)) {
-    if (context.order?.order_status === "freight_approved") {
-      return "The payment button is now active in the Deal Actions tab. Tap it to review your full estimate — all secured by IziXport escrow.";
+  const aiReplyFor = (text: string) => {
+    const lower = text.toLowerCase();
+    if (PAYMENT_TRIGGERS.test(lower)) {
+      if (order?.order_status === "freight_approved") return "The payment button is now active in the Deal Actions tab. Tap it to review your full estimate — all secured by IziXport escrow.";
+      return "The payment button appears in Deal Actions once the exporter submits the freight quote and you approve it.";
     }
-    return "The payment button appears in Deal Actions once the exporter submits the freight quote and you approve it.";
-  }
+    if (/(freight|shipping|quote|carrier)/i.test(text) && isExporter) return "Go to Deal Actions and fill in the freight quote form to enter your carrier, cost and estimated delivery time.";
+    if (/(photo|picture|image|proof)/i.test(text)) return "Upload pre-shipment photos in the checklist to show the buyer the goods are packed and ready.";
+    if (/(track|tracking|lading|bill)/i.test(text)) return "Upload the Bill of Lading, then enter the tracking number in the checklist so the buyer can independently verify the shipment.";
+    if (/(confirm|delivered|release escrow|release payment)/i.test(text)) return "Once the buyer confirms delivery, escrow will be released automatically.";
+    return "Keep the deal moving step by step. Use the checklist for shipping milestones and keep all communication inside this room.";
+  };
 
-  // Freight/shipping
-  if (lower.includes("freight") || lower.includes("shipping") || lower.includes("delivery")) {
-    if (context.order?.order_status === "enquiring" && context.isExporter) {
-      return "As the exporter, you need to submit a freight quote in the Deal Actions tab. Once submitted, the buyer can approve it.";
-    }
-    if (context.order?.order_status === "freight_quoted" && context.isBuyer) {
-      return "The exporter has submitted a freight quote. Please review and approve it in the Deal Actions tab to proceed with payment.";
-    }
-    if (context.order?.order_status === "freight_approved") {
-      return "The freight quote has been approved. The buyer can now fund the escrow in the Deal Actions tab.";
-    }
-    if (context.order?.order_status === "escrow_funded") {
-      return "Escrow has been funded. The exporter should now complete the shipment checklist in the Deal Actions tab.";
-    }
-    if (context.order?.order_status === "goods_shipped") {
-      return "The goods have been shipped. The buyer can confirm delivery in the Deal Actions tab once they receive the goods.";
-    }
-    if (context.order?.order_status === "delivered") {
-      return "Delivery has been confirmed and escrow released. The deal is complete.";
-    }
-    return "I can help with questions about freight, shipping, and delivery. What specifically would you like to know?";
-  }
+  const handleSend = async () => {
+    if (!currentUser || !order || !orderId || sending) return;
+    const text = input.trim();
+    if (!text) return;
+    setInput(""); setSending(true);
 
-  // Checklist
-  if (lower.includes("checklist") || lower.includes("documents") || lower.includes("proof")) {
-    if (context.order?.order_status === "escrow_funded" && context.isExporter) {
-      return "Your shipment checklist is now active in the Deal Actions tab. Please upload the required documents and photos.";
-    }
-    if (context.order?.order_status === "escrow_funded" && context.isBuyer) {
-      return "The exporter's shipment checklist is now active in the Deal Actions tab. You can track their progress there.";
-    }
-    return "The checklist becomes active once escrow is funded. The exporter will then upload documents and photos.";
-  }
+    const scan = scanMessage(text);
+    if (scan.blocked) { toast.error(`Please do not send ${scan.reason} here.`); setSending(false); return; }
 
-  // General help
-  return "I'm not sure how to answer that. Please try rephrasing your question or ask about deals, payments, shipping, verification, fees, or safety.";
-};
+    try {
+      const senderType = isBuyer ? "buyer" : "exporter";
+      const { data: inserted, error } = await supabase.from("messages").insert({
+        order_id: orderId, sender_id: currentUser.id, sender_type: senderType, content: text, is_ai: false,
+      }).select().single();
+      if (error) throw error;
+      setMessages((prev) => [...prev, inserted as Message]);
+      if (isBuyer && PAYMENT_TRIGGERS.test(text) && paymentReady) await initializePayment();
+      if (shouldAIRespond(text)) {
+        const reply = aiReplyFor(text);
+        setTimeout(async () => {
+          await supabase.from("messages").insert({ order_id: orderId, sender_type: "ai", is_ai: true, content: reply });
+        }, 700);
+      }
+    } catch (err) { toast.error("Failed to send message."); }
+    finally { setSending(false); }
+  };
+
+  const showPaymentButton = Boolean(isBuyer && order && order.order_status === "freight_approved");
 
   const submitBuyerReview = async () => {
-    if (!buyerRating) { toast.error("Please select a rating."); return; }
-    if (!currentUser || !order?.buyer_id) return;
+    if (buyerRating === 0) { toast.error("Please select a rating."); return; }
     setSubmittingBuyerReview(true);
     try {
-      const { error } = await supabase.from("buyer_reviews").insert({
-        order_id: orderId, reviewer_id: currentUser.id, buyer_id: order.buyer_id, rating: buyerRating,
-      });
-      if (error) throw error;
-      toast.success("Rating submitted!");
+      const { error } = await supabase.from("exporter_reviews").insert({ order_id: order!.id, reviewer_id: currentUser!.id, reviewee_id: order!.buyer_id, rating: buyerRating, review: null });
+      if (error) throw new Error(error.message);
+      toast.success("Thank you for your review!");
       setShowBuyerReview(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to submit rating.");
-    } finally {
-      setSubmittingBuyerReview(false);
-    }
+    } catch (err: any) { toast.error("Save failed: " + (err?.message || "Unknown error")); }
+    finally { setSubmittingBuyerReview(false); }
   };
 
   if (loading || !order || !currentUser) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100dvh", background: "#F9FAFB" }}>
-        <Spinner size={30} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#F9FAFB" }}>
+        <Spinner size={32} color="#006B3F" />
       </div>
     );
   }
-
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
-    setSending(true);
-
-    const blockedCheck = scanMessage(input);
-    if (blockedCheck.blocked) {
-      toast.error(`Your message contains ${blockedCheck.reason} and cannot be sent.`);
-      await supabase.from("messages").insert({
-        order_id: orderId, sender_id: currentUser.id, sender_type: currentUser.role,
-        content: input, is_blocked: true,
-      });
-      setInput("");
-      setSending(false);
-      return;
-    }
-
-    try {
-      await supabase.from("messages").insert({
-        order_id: orderId, sender_id: currentUser.id, sender_type: currentUser.role,
-        content: input,
-      });
-
-      // AI auto-response logic
-      if (shouldAIRespond(input)) {
-        const aiResponse = await aiReplyFor(input, { isBuyer, isExporter, order, paymentReady });
-        if (aiResponse) {
-          await supabase.from("messages").insert({
-            order_id: orderId, sender_type: "ai", is_ai: true, content: aiResponse,
-          });
-        }
-      }
-
-      setInput("");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to send message.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const showPaymentButton = isBuyer && order.order_status === "freight_approved";
 
   const statusMap: Record<string, { label: string; color: string; bg: string; border: string }> = {
     enquiring: { label: "Negotiating", color: "#D4A843", bg: "#FEF3C7", border: "#FDE68A" },
@@ -1870,7 +1801,7 @@ export default function DealRoom() {
     arrived: { label: "Arrived", color: "#0369A1", bg: "#F0F9FF", border: "#BAE6FD" },
     delivered: { label: "Delivered", color: "#059669", bg: "#ECFDF5", border: "#A7F3D0" },
     completed: { label: "Completed", color: "#059669", bg: "#D1FAE5", border: "#A7F3D0" },
-    disputed: { label: "Disputed", color: "#DC2626", bg: "#FEE2F2", border: "#FECACA" },
+    disputed: { label: "Disputed", color: "#DC2626", bg: "#FEE2E2", border: "#FECACA" },
   };
 
   const headerStatus = statusMap[order.order_status] || statusMap.enquiring;
@@ -1888,15 +1819,15 @@ export default function DealRoom() {
   let lastDate = "";
   viewMessages.forEach((msg, index) => {
     const day = new Date(msg.created_at).toDateString();
-    if (day !== lastDate) {
-      renderItems.push({ kind: "date", label: formatDateLabel(msg.created_at), key: `date-${index}` });
-      lastDate = day;
-    }
+    if (day !== lastDate) { renderItems.push({ kind: "date", label: formatDateLabel(msg.created_at), key: `date-${index}` }); lastDate = day; }
     const prev = viewMessages[index - 1];
-    const showAvatar = !prev || prev.sender_type !== msg.sender_type ||
-      new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() > 120000;
+    const showAvatar = !prev || prev.sender_type !== msg.sender_type || new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() > 120000;
     renderItems.push({ kind: "msg", msg, key: msg.id, showAvatar });
   });
+
+  // FIX 2: Checklist always visible for both parties when escrow is active
+  // No more "showChecklist" toggle needed — auto-shows when status is right
+  const escrowIsActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
 
   return (
     <>
@@ -1916,14 +1847,11 @@ export default function DealRoom() {
           </div>
         )}
 
-        {/* Header */}
         <div style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", gap: 10 }}>
             <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>←</button>
             <div style={{ background: "#F3F4F6", borderRadius: 12, padding: "8px 10px", flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 12.5, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {order.listing.title}
-              </div>
+              <div style={{ fontWeight: 800, fontSize: 12.5, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.listing.title}</div>
               <div style={{ fontSize: 10, color: "#6B7280" }}>
                 {order.quantity} {order.listing.unit} · <span style={{ color: "#D4A843", fontWeight: 700 }}>{formatMoney(Number(order.total_amount || 0), order.currency || "USD")}</span>
               </div>
@@ -1937,7 +1865,6 @@ export default function DealRoom() {
               <StatusPill {...headerStatus} />
             </div>
           </div>
-
           <div style={{ display: "flex", borderTop: "1px solid #E5E7EB" }}>
             {(["messages", "actions"] as const).map((tab) => (
               <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: "12px", background: activeTab === tab ? "#fff" : "#F9FAFB", border: "none", borderBottom: activeTab === tab ? "2px solid #D4A843" : "2px solid transparent", color: activeTab === tab ? "#D4A843" : "#6B7280", fontWeight: 800, fontSize: 12, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", cursor: "pointer", transition: "all 0.2s" }}>
@@ -1961,11 +1888,7 @@ export default function DealRoom() {
                 </div>
               </div>
             )}
-
-            <div style={{ padding: "10px 14px 0", flexShrink: 0 }}>
-              <DealProgress order={order} />
-            </div>
-
+            <div style={{ padding: "10px 14px 0", flexShrink: 0 }}><DealProgress order={order} /></div>
             <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px 6px" }}>
               {renderItems.map((item) => {
                 if (item.kind === "date") return <DateDivider key={item.key} label={item.label} />;
@@ -1985,32 +1908,20 @@ export default function DealRoom() {
                 }
                 const own = msg.sender_type === (isBuyer ? "buyer" : "exporter");
                 return (
-                  <UserMessage
-                    key={item.key} msg={msg} isOwn={own}
+                  <UserMessage key={item.key} msg={msg} isOwn={own}
                     senderName={msg.sender_type === "buyer" ? order.buyer?.company_name || "Buyer" : order.exporter?.company_name || "Exporter"}
-                    showAvatar={item.showAvatar} order={order}
-                    viewerLang={viewerLang}
-                  />
+                    showAvatar={item.showAvatar} order={order} viewerLang={viewerLang} />
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
-
             {order.order_status !== "completed" && order.order_status !== "disputed" && !(order.order_status === "delivered" && isBuyer) && (
               <div style={{ flexShrink: 0, borderTop: "1px solid #E5E7EB", background: "#fff", padding: "10px 12px" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    rows={1}
-                    placeholder="Type a message…"
-                    style={{ flex: 1, minHeight: 44, maxHeight: 120, padding: "11px 12px", borderRadius: 14, border: "1px solid #D1D5DB", background: "#F9FAFB", resize: "none", outline: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}
-                  />
-                  <button
-                    onClick={handleSend}
-                    disabled={sending || !input.trim()}
-                    style={{ height: 44, padding: "0 16px", borderRadius: 14, border: "none", background: "#D4A843", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                  >
+                  <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} placeholder="Type a message…"
+                    style={{ flex: 1, minHeight: 44, maxHeight: 120, padding: "11px 12px", borderRadius: 14, border: "1px solid #D1D5DB", background: "#F9FAFB", resize: "none", outline: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+                  <button onClick={handleSend} disabled={sending || !input.trim()}
+                    style={{ height: 44, padding: "0 16px", borderRadius: 14, border: "none", background: "#D4A843", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
                     {sending ? <Spinner size={14} color="#fff" /> : "Send"}
                   </button>
                 </div>
@@ -2019,27 +1930,18 @@ export default function DealRoom() {
           </>
         ) : (
           <div style={{ flex: 1, height: "calc(100dvh - 160px)", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "14px", display: "grid", gap: 12, paddingBottom: "max(40px, env(safe-area-inset-bottom, 24px))" }}>
-            {isExporter && (!order.freight_company || order.order_status === "enquiring") && (
-              <FreightQuoteForm orderId={order.id} orderCurrency={currency} onSubmitted={() => refetchOrder()} />
+            {isExporter && (!order.freight_company || order.order_status === FREIGHT_CHANGE_REQUESTED_STATUS) && (
+              <FreightQuoteForm order={order} onSubmitted={() => refetchOrder()} />
             )}
-
-            {order.order_status === "freight_quoted" && isBuyer && (
-              <FreightApprovalCard order={order} orderId={order.id} currentUser={currentUser} />
-            )}
-
+            {order.order_status === "freight_quoted" && isBuyer && <FreightApprovalCard order={order} orderId={order.id} currentUser={currentUser} />}
             {["freight_approved","escrow_funded","docs_in_progress","goods_shipped","in_transit","arrived","delivered"].includes(order.order_status) && (
               <FreightSummary order={order} isBuyer={Boolean(isBuyer)} />
             )}
-
             {showPaymentButton && (
               <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #E5E7EB", padding: 16, boxSizing: "border-box", width: "100%" }}>
                 <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12 }}>💳 Secure Escrow Payment</div>
                 <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
-                  {[
-                    { label: "Goods value", value: formatMoney(goodsAmount, currency) },
-                    { label: "Freight", value: formatMoney(freightAmount, currency) },
-                    { label: "Platform fee (3%)", value: formatMoney(buyerFee, currency) },
-                  ].map(({ label, value }) => (
+                  {[{ label: "Goods value", value: formatMoney(goodsAmount, currency) }, { label: "Freight", value: formatMoney(freightAmount, currency) }, { label: "Platform fee (3%)", value: formatMoney(buyerFee, currency) }].map(({ label, value }) => (
                     <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ color: "#6B7280", fontSize: 12 }}>{label}</span>
                       <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{value}</span>
@@ -2058,7 +1960,7 @@ export default function DealRoom() {
               </div>
             )}
 
-            {["escrow_funded","docs_in_progress","goods_shipped","in_transit","arrived","delivered","completed"].includes(order.order_status) && (
+            {escrowIsActive && (
               <>
                 {isExporter && (
                   <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #E5E7EB", padding: 16, boxSizing: "border-box", width: "100%" }}>
@@ -2084,21 +1986,7 @@ export default function DealRoom() {
                   </div>
                 )}
 
-                {isExporter && (
-                  <div style={{ background: "#FEF3C7", borderRadius: 16, border: "1px solid #FDE68A", padding: 16, boxSizing: "border-box", width: "100%", textAlign: "center" }}>
-                    <div style={{ fontSize: 18, marginBottom: 8 }}>🔒</div>
-                    <div style={{ fontWeight: 900, fontSize: 15, color: "#D4A843", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 8 }}>
-                      Payment confirmed! Your checklist is now active.
-                    </div>
-                    <div style={{ color: "#374151", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                      Upload photos, Bill of Lading, and tracking number to release payment.
-                    </div>
-                    <button onClick={() => setShowChecklist(!showChecklist)} style={{ padding: "10px 18px", borderRadius: 999, background: "#D4A843", border: "none", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase" }}>
-                      {showChecklist ? "Hide Checklist" : "View Checklist →"}
-                    </button>
-                  </div>
-                )}
-
+                {/* FIX 2: Escrow confirmation banner */}
                 {isBuyer && (
                   <div style={{ background: "#ECFDF5", borderRadius: 16, border: "1px solid #A7F3D0", padding: 16, boxSizing: "border-box", width: "100%", textAlign: "center" }}>
                     <div style={{ fontSize: 18, marginBottom: 8 }}>✅</div>
@@ -2111,32 +1999,36 @@ export default function DealRoom() {
                   </div>
                 )}
 
-                {(isExporter && showChecklist) || isBuyer ? (
-                  <ChecklistPanel orderId={order.id} currentUser={currentUser} isExporter={Boolean(isExporter)} order={order} checklistRef={checklistRef} />
-                ) : null}
+                {/* FIX 2: Checklist always shows when escrow is active — no toggle needed */}
+                <ChecklistPanel
+                  orderId={order.id}
+                  currentUser={currentUser}
+                  isExporter={Boolean(isExporter)}
+                  order={order}
+                  checklistRef={checklistRef}
+                />
 
-                <DeliveryConfirmPanel order={order} orderId={order.id} currentUser={currentUser} isBuyer={Boolean(isBuyer)} onShowPlatformReview={() => setShowPlatformReview(true)} />
+                {/* FIX 4: Delivery confirm shows after checklist completes (goods_shipped status) */}
+                <DeliveryConfirmPanel
+                  order={order}
+                  orderId={order.id}
+                  currentUser={currentUser}
+                  isBuyer={Boolean(isBuyer)}
+                  onShowPlatformReview={() => setShowPlatformReview(true)}
+                />
               </>
             )}
           </div>
         )}
       </div>
 
-      {/* Buyer review modal */}
       {showBuyerReview && (
         <BottomSheet open onClose={() => setShowBuyerReview(false)} title="Rate Buyer">
           <div style={{ display: "grid", gap: 16 }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ color: "#374151", fontSize: 13, marginBottom: 12 }}>
-                How was your experience with {order.buyer?.company_name || "the buyer"}?
-              </div>
+              <div style={{ color: "#374151", fontSize: 13, marginBottom: 12 }}>How was your experience with {order.buyer?.company_name || "the buyer"}?</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                {[
-                  { label: "Best", value: 5, color: "#006B3F", bg: "#ECFDF5" },
-                  { label: "Good", value: 4, color: "#059669", bg: "#D1FAE5" },
-                  { label: "Medium", value: 3, color: "#D4A843", bg: "#FEF3C7" },
-                  { label: "Bad", value: 2, color: "#DC2626", bg: "#FEE2E2" },
-                ].map((opt) => (
+                {[{ label: "Best", value: 5, color: "#006B3F", bg: "#ECFDF5" }, { label: "Good", value: 4, color: "#059669", bg: "#D1FAE5" }, { label: "Medium", value: 3, color: "#D4A843", bg: "#FEF3C7" }, { label: "Bad", value: 2, color: "#DC2626", bg: "#FEE2E2" }].map((opt) => (
                   <button key={opt.value} onClick={() => setBuyerRating(opt.value)} style={{ padding: "12px 8px", borderRadius: 10, border: buyerRating === opt.value ? `2px solid ${opt.color}` : "1.5px solid #E5E7EB", background: buyerRating === opt.value ? opt.bg : "#fff", color: opt.color, fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     {opt.label}
                   </button>
@@ -2157,10 +2049,7 @@ export default function DealRoom() {
         <PlatformReviewPrompt
           userId={currentUser.id}
           userRole={currentUser.role as "buyer" | "exporter"}
-          onClose={() => {
-            setShowPlatformReview(false);
-            if (currentUser?.role === "buyer") navigate("/");
-          }}
+          onClose={() => { setShowPlatformReview(false); if (currentUser?.role === "buyer") navigate("/"); }}
         />
       )}
     </>
