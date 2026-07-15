@@ -3,7 +3,8 @@
 // UPDATED — LibreTranslate integration via translate.argosopentech.com
 // UPDATED — Fixed checklist seeding race condition (no more delete/reseed loop)
 // UPDATED — Fixed duplicate "Payment secured" message (atomic DB-level guard)
-// All existing business logic, escrow, payment, dispute flow preserved
+// UPDATED — Pre-shipment photos now support multiple uploads + gallery grid
+// UPDATED — All uploads now post inline chat messages with image/document attachments
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -22,6 +23,8 @@ interface Message {
   is_blocked?: boolean;
   created_at: string;
   translatedContent?: string; // runtime only — not in DB
+  image_url?: string | null; // NEW
+  document_url?: string | null; // NEW
 }
 
 interface ChecklistItem {
@@ -43,6 +46,7 @@ interface ChecklistItem {
   document_verified?: boolean;
   verified_by?: string | null;
   verified_at?: string | null;
+  document_urls?: string[] | null; // NEW: array for pre-shipment photos
 }
 
 interface Order {
@@ -423,6 +427,71 @@ function AutoTranslateLabel({ detectedLang, onShowOriginal }: {
   );
 }
 
+// ─── MESSAGE ATTACHMENTS (images + documents) ──────────────────────────────
+// NEW: renders image grids and document links inside any message bubble
+function MessageAttachments({ msg }: { msg: Message }) {
+  if (!msg.image_url && !msg.document_url) return null;
+
+  let imageUrls: string[] = [];
+  if (msg.image_url) {
+    try {
+      const parsed = JSON.parse(msg.image_url);
+      imageUrls = Array.isArray(parsed) ? parsed : [msg.image_url];
+    } catch {
+      imageUrls = [msg.image_url];
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      {imageUrls.length > 0 && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: imageUrls.length === 1 ? "1fr" : "repeat(2, 1fr)",
+          gap: 6,
+        }}>
+          {imageUrls.map((url, idx) => (
+            <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+              <img
+                src={url}
+                alt={`Attachment ${idx + 1}`}
+                style={{
+                  width: "100%",
+                  maxHeight: 240,
+                  objectFit: "cover",
+                  borderRadius: 8,
+                  border: "1px solid #E5E7EB",
+                  cursor: "pointer",
+                  display: "block",
+                }}
+              />
+            </a>
+          ))}
+        </div>
+      )}
+      {msg.document_url && (
+        <a
+          href={msg.document_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginTop: imageUrls.length > 0 ? 6 : 0,
+            color: "#D4A843",
+            fontSize: 12,
+            textDecoration: "underline",
+            fontWeight: 700,
+          }}
+        >
+          📄 View document →
+        </a>
+      )}
+    </div>
+  );
+}
+
 function AIMessage({ msg, showAvatar, viewerLang }: {
   msg: Message; showAvatar: boolean; viewerLang: string;
 }) {
@@ -462,6 +531,7 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
           <div style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
             {displayContent}
           </div>
+          <MessageAttachments msg={msg} />
           {translated && !showOriginal && (
             <AutoTranslateLabel
               detectedLang={detectedLang}
@@ -524,6 +594,7 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
             <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
               {msg.content}
             </div>
+            <MessageAttachments msg={msg} />
           </div>
           <span style={{ color: "#9CA3AF", fontSize: 10, paddingRight: 4 }}>{formatTime(msg.created_at)}</span>
         </div>
@@ -562,6 +633,7 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
               {displayContent}
             </div>
           )}
+          <MessageAttachments msg={msg} />
           {translated && !translating && !showOriginal && (
             <AutoTranslateLabel
               detectedLang={detectedLang}
@@ -926,6 +998,8 @@ function FreightApprovalCard({ order, orderId, currentUser }: {
 // tick. The DB has already been cleaned of old 9-step rows via a one-time SQL
 // migration, so this now just seeds an empty checklist once, guarded against
 // concurrent calls with migratingRef.
+// UPDATED: pre-shipment photos now support multiple uploads (document_urls JSONB)
+// and every upload posts an inline chat message with image_url / document_url.
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
   orderId: string; currentUser: CurrentUser; isExporter: boolean;
   order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
@@ -969,6 +1043,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         document_verified: false,
         verified_by: null,
         verified_at: null,
+        document_urls: step.key === "pre_shipment_photos" ? [] : null,
       }));
       const { error } = await supabase.from("deal_checklist").insert(items);
       if (error) console.error("Failed to seed checklist:", error);
@@ -1034,7 +1109,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
     }
 
     // Pre-shipment photos requires document upload first
-    if (step.step_key === "pre_shipment_photos" && !step.document_url) {
+    if (step.step_key === "pre_shipment_photos" && (!step.document_urls || step.document_urls.length === 0)) {
       toast.error("Upload the pre-shipment photos first.");
       return;
     }
@@ -1080,21 +1155,76 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   };
 
   const handleUpload = async (step: ChecklistItem) => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
+    const files = fileRef.current?.files;
+    if (!files || files.length === 0) return;
     setUploading(true);
+
     try {
-      const { data, error } = await supabase.storage.from("listings").upload(
-        `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
-        file, { cacheControl: "3600", upsert: false }
-      );
-      if (error) throw error;
-      const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
-      const { error: updateErr } = await supabase.from("deal_checklist")
-        .update({ document_url: url, document_name: file.name })
-        .eq("id", step.id);
-      if (updateErr) throw updateErr;
-      toast.success("Document uploaded.");
+      if (step.step_key === "pre_shipment_photos") {
+        const uploadedUrls: string[] = [];
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const { data, error } = await supabase.storage.from("listings").upload(
+            `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
+            file, { cacheControl: "3600", upsert: false }
+          );
+          if (error) throw error;
+          const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
+          uploadedUrls.push(url);
+        }
+
+        // Fetch existing array and append
+        const { data: existingData } = await supabase
+          .from("deal_checklist")
+          .select("document_urls")
+          .eq("id", step.id)
+          .single();
+
+        const existingUrls = existingData?.document_urls || [];
+        const allUrls = Array.isArray(existingUrls) ? [...existingUrls, ...uploadedUrls] : uploadedUrls;
+
+        const { error: updateErr } = await supabase.from("deal_checklist")
+          .update({ document_urls: allUrls })
+          .eq("id", step.id);
+        if (updateErr) throw updateErr;
+
+        // Post chat message with all new photos
+        await supabase.from("messages").insert({
+          order_id: orderId,
+          sender_type: "system",
+          is_ai: true,
+          content: `📸 ${uploadedUrls.length} pre-shipment photo(s) uploaded by exporter`,
+          image_url: JSON.stringify(uploadedUrls),
+        });
+
+        toast.success(`${uploadedUrls.length} photo(s) uploaded.`);
+      } else {
+        // Single file upload for Bill of Lading and other steps
+        const file = files[0];
+        const { data, error } = await supabase.storage.from("listings").upload(
+          `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
+          file, { cacheControl: "3600", upsert: false }
+        );
+        if (error) throw error;
+        const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
+
+        const { error: updateErr } = await supabase.from("deal_checklist")
+          .update({ document_url: url, document_name: file.name })
+          .eq("id", step.id);
+        if (updateErr) throw updateErr;
+
+        // Post chat message with document link
+        await supabase.from("messages").insert({
+          order_id: orderId,
+          sender_type: "system",
+          is_ai: true,
+          content: `📄 ${step.step_label} uploaded by exporter`,
+          document_url: url,
+        });
+
+        toast.success("Document uploaded.");
+      }
     } catch (err: any) {
       toast.error(err?.message || "Upload failed.");
     } finally {
@@ -1115,6 +1245,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         requires_document: step.requires_document, icon: step.icon,
         created_at: order.created_at, reference_number: null, carrier_name: null,
         document_verified: false, verified_by: null, verified_at: null,
+        document_urls: null,
       }))
     : checklist;
 
@@ -1206,8 +1337,23 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
-                    {/* Document link */}
-                    {step.document_url && (
+                    {/* Photo gallery for pre-shipment photos */}
+                    {step.step_key === "pre_shipment_photos" && step.document_urls && step.document_urls.length > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 6 }}>
+                        {step.document_urls.map((url, idx) => (
+                          <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                            <img
+                              src={url}
+                              alt={`Pre-shipment ${idx + 1}`}
+                              style={{ width: "100%", height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid #E5E7EB" }}
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Single document link for other steps */}
+                    {step.step_key !== "pre_shipment_photos" && step.document_url && (
                       isExporter ? (
                         <a href={step.document_url} target="_blank" rel="noopener noreferrer" style={{ color: "#D4A843", fontSize: 11, textDecoration: "underline", display: "block", marginTop: 2 }}>
                           View document →
@@ -1257,11 +1403,23 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                             <>
                               <button
                                 onClick={() => fileRef.current?.click()}
-                                style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: "pointer" }}
+                                disabled={uploading}
+                                style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.6 : 1 }}
                               >
-                                Upload {step.step_key === "pre_shipment_photos" ? "Photos" : "Document"}
+                                {step.step_key === "pre_shipment_photos" && step.document_urls && step.document_urls.length > 0
+                                  ? "Add More Photos"
+                                  : step.step_key === "pre_shipment_photos"
+                                  ? "Upload Photos"
+                                  : "Upload Document"}
                               </button>
-                              <input type="file" accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"} ref={fileRef} style={{ display: "none" }} onChange={() => handleUpload(step)} />
+                              <input
+                                type="file"
+                                accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"}
+                                ref={fileRef}
+                                style={{ display: "none" }}
+                                onChange={() => handleUpload(step)}
+                                multiple={step.step_key === "pre_shipment_photos"}
+                              />
                             </>
                           )}
                           <button
