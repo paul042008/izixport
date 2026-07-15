@@ -6,7 +6,7 @@
 // UPDATED — Pre-shipment photos now support multiple uploads + gallery grid
 // UPDATED — All uploads now post inline chat messages with image/document attachments
 
-import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { supabase } from '@/lib/supabase/client';
@@ -1011,11 +1011,13 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
   const seedingRef = useRef(false);
+  const cleanedRef = useRef(false); // NEW: prevents infinite cleanup loops
+
+  const validStepKeys = useMemo(() => new Set(DEFAULT_CHECKLIST.map(d => d.key)), []);
 
   const seedChecklist = async () => {
     if (!isExporter || seedingRef.current) return;
 
-    // Only seed if empty — don't touch existing rows
     const { data: check } = await supabase
       .from("deal_checklist")
       .select("id")
@@ -1059,11 +1061,22 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
 
-    if (error || !data) return;
+    if (error) return;
+
+    // DEFENSIVE: one-time purge of old 9-step data
+    if (!cleanedRef.current && data && data.length > 0) {
+      const hasOldSteps = data.some((item: any) => !validStepKeys.has(item.step_key));
+      if (hasOldSteps) {
+        cleanedRef.current = true;
+        await supabase.from("deal_checklist").delete().eq("order_id", orderId);
+        await seedChecklist();
+        return; // Realtime will re-fire loadChecklist with clean data
+      }
+    }
 
     setChecklist(data as ChecklistItem[]);
 
-    if (data.length === 0 && isExporter && [
+    if ((!data || data.length === 0) && isExporter && [
       "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
     ].includes(order.order_status)) {
       await seedChecklist();
@@ -1096,25 +1109,21 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       toast.error("Checklist is not active yet. Wait for escrow to be funded.");
       return;
     }
-    // Guard: already completed — don't duplicate messages or status updates
     if (step.completed) {
       toast.error("This step is already completed.");
       return;
     }
 
-    // Bill of Lading requires document upload first
     if (step.step_key === "bill_of_lading" && !step.document_url) {
       toast.error("Upload the Bill of Lading document first.");
       return;
     }
 
-    // Pre-shipment photos requires document upload first
     if (step.step_key === "pre_shipment_photos" && (!step.document_urls || step.document_urls.length === 0)) {
       toast.error("Upload the pre-shipment photos first.");
       return;
     }
 
-    // Tracking step requires number and carrier
     if (step.step_key === "tracking_confirmed") {
       if (!trackingNumber.trim()) { toast.error("Enter the tracking number."); return; }
       if (!carrier) { toast.error("Select the carrier."); return; }
@@ -1174,7 +1183,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
           uploadedUrls.push(url);
         }
 
-        // Fetch existing array and append
         const { data: existingData } = await supabase
           .from("deal_checklist")
           .select("document_urls")
@@ -1189,7 +1197,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
           .eq("id", step.id);
         if (updateErr) throw updateErr;
 
-        // Post chat message with all new photos
         await supabase.from("messages").insert({
           order_id: orderId,
           sender_type: "system",
@@ -1200,7 +1207,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
         toast.success(`${uploadedUrls.length} photo(s) uploaded.`);
       } else {
-        // Single file upload for Bill of Lading and other steps
         const file = files[0];
         const { data, error } = await supabase.storage.from("listings").upload(
           `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
@@ -1214,7 +1220,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
           .eq("id", step.id);
         if (updateErr) throw updateErr;
 
-        // Post chat message with document link
         await supabase.from("messages").insert({
           order_id: orderId,
           sender_type: "system",
@@ -1307,7 +1312,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       {step.step_label}
                     </div>
 
-                    {/* Hint text for active step */}
                     {isActive && isExporter && hint && (
                       <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2, lineHeight: 1.5, fontStyle: "italic" }}>
                         {hint}
@@ -1320,7 +1324,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
-                    {/* Tracking info display */}
                     {isCompleted && isTracking && step.reference_number && (
                       <div style={{ marginTop: 4, fontSize: 11, color: "#374151" }}>
                         <div><strong>Tracking:</strong> {step.reference_number}</div>
@@ -1337,7 +1340,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
-                    {/* Photo gallery for pre-shipment photos */}
                     {step.step_key === "pre_shipment_photos" && step.document_urls && step.document_urls.length > 0 && (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 6 }}>
                         {step.document_urls.map((url, idx) => (
@@ -1352,7 +1354,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
-                    {/* Single document link for other steps */}
                     {step.step_key !== "pre_shipment_photos" && step.document_url && (
                       isExporter ? (
                         <a href={step.document_url} target="_blank" rel="noopener noreferrer" style={{ color: "#D4A843", fontSize: 11, textDecoration: "underline", display: "block", marginTop: 2 }}>
@@ -1369,10 +1370,8 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       )
                     )}
 
-                    {/* Active exporter controls */}
                     {isActive && isExporter && !checklistEmpty && (
                       <div style={{ marginTop: 8 }}>
-                        {/* Tracking step inputs */}
                         {isTracking && (
                           <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
                             <input

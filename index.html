@@ -2,28 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IziXport - Nigerian Trade Marketplace</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#006B3F" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
-    <!-- Paystack Inline Script -->
-    <script src="https://js.paystack.co/v2/inline.js"></script>
-    
-    <!-- Flutterwave Standard Checkout -->
-    <script src="https://checkout.flutterwave.com/v3.js"></script>
-    
-    <meta name="description" content="Verified Nigerian Trade Marketplace" />
+    <title>IziXport — Verified Nigerian Export Marketplace</title>
+    <meta name="description" content="IziXport is Africa's trusted export marketplace. Connect verified Nigerian exporters with international buyers. Escrow-secured payments via PandasCrow, freight tracking, and AI-powered deal facilitation." />
+    <meta name="keywords" content="Nigerian exports, agricultural exports, hibiscus, sesame seeds, ginger, cashew, cocoa, verified exporters, escrow payments, PandasCrow, international trade, Africa trade" />
+    <meta name="author" content="IziXport" />
+    <meta name="robots" content="index, follow" />
 
-    <!-- Google Fonts: Barlow + Barlow Condensed -->
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://izixport.com" />
+    <meta property="og:title" content="IziXport — Verified Nigerian Export Marketplace" />
+    <meta property="og:description" content="Connect with verified Nigerian exporters. Escrow-secured deals via PandasCrow, real-time tracking, and AI trade facilitation." />
+    <meta property="og:image" content="https://izixport.com/og-image.jpg" />
+    <meta property="og:site_name" content="IziXport" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://izixport.com" />
+    <meta name="twitter:title" content="IziXport — Verified Nigerian Export Marketplace" />
+    <meta name="twitter:description" content="Connect with verified Nigerian exporters. Escrow-secured deals via PandasCrow, real-time tracking, and AI trade facilitation." />
+    <meta name="twitter:image" content="https://izixport.com/og-image.jpg" />
+    <meta name="twitter:creator" content="@izixport" />
+
+    <!-- WhatsApp / WhatsApp Business -->
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="IziXport - Verified Nigerian Export Marketplace" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://checkout.flutterwave.com" />
+    <link rel="dns-prefetch" href="https://izixport.com" />
+
+    <!-- Google Fonts -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Barlow:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
 
-    <!-- TEMP DEBUG CONSOLE — REMOVE BEFORE SHIPPING TO PRODUCTION -->
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-    <script>eruda.init();</script>
+    <!-- Flutterwave Standard Checkout -->
+    <script src="https://checkout.flutterwave.com/v3.js" defer></script>
   </head>
 
   <body>
