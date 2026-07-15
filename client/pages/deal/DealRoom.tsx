@@ -3,8 +3,8 @@
 // UPDATED — LibreTranslate integration via translate.argosopentech.com
 // UPDATED — Fixed checklist seeding race condition (no more delete/reseed loop)
 // UPDATED — Fixed duplicate "Payment secured" message (atomic DB-level guard)
-// UPDATED — Pre-shipment photos now support multiple uploads + gallery grid
-// UPDATED — All uploads now post inline chat messages with image/document attachments
+// UPDATED — Multi-photo upload for Pre-Shipment Photos + uploads now post into Chat Messages
+// All existing business logic, escrow, payment, dispute flow preserved
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -23,8 +23,13 @@ interface Message {
   is_blocked?: boolean;
   created_at: string;
   translatedContent?: string; // runtime only — not in DB
-  image_url?: string | null; // NEW
-  document_url?: string | null; // NEW
+  image_url?: string | null;
+  document_url?: string | null;
+}
+
+interface ChecklistPhoto {
+  url: string;
+  name: string;
 }
 
 interface ChecklistItem {
@@ -37,6 +42,7 @@ interface ChecklistItem {
   completed_by: string | null;
   document_url: string | null;
   document_name: string | null;
+  document_urls?: ChecklistPhoto[] | null;
   notes: string | null;
   requires_document: boolean;
   icon: string;
@@ -46,7 +52,6 @@ interface ChecklistItem {
   document_verified?: boolean;
   verified_by?: string | null;
   verified_at?: string | null;
-  document_urls?: string[] | null; // NEW: array for pre-shipment photos
 }
 
 interface Order {
@@ -151,7 +156,7 @@ const DEFAULT_CHECKLIST = [
     label: "Pre-Shipment Photos",
     requires_document: true,
     icon: "📸",
-    hint: "Upload photos of the packed goods, bags, and container before loading. Clear, well-lit photos build buyer trust.",
+    hint: "Upload photos of the packed goods, bags, and container before loading. You can upload multiple photos — clear, well-lit photos build buyer trust.",
   },
   {
     key: "bill_of_lading",
@@ -168,6 +173,10 @@ const DEFAULT_CHECKLIST = [
     hint: "Enter the container or shipment tracking number so the buyer can independently verify progress.",
   },
 ];
+
+const MULTI_PHOTO_STEP = "pre_shipment_photos";
+
+const isImageFile = (name: string) => /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(name);
 
 // ─── LANGUAGE NAME MAP ───────────────────────────────────────────────────────
 const LANG_NAMES: Record<string, string> = {
@@ -427,71 +436,6 @@ function AutoTranslateLabel({ detectedLang, onShowOriginal }: {
   );
 }
 
-// ─── MESSAGE ATTACHMENTS (images + documents) ──────────────────────────────
-// NEW: renders image grids and document links inside any message bubble
-function MessageAttachments({ msg }: { msg: Message }) {
-  if (!msg.image_url && !msg.document_url) return null;
-
-  let imageUrls: string[] = [];
-  if (msg.image_url) {
-    try {
-      const parsed = JSON.parse(msg.image_url);
-      imageUrls = Array.isArray(parsed) ? parsed : [msg.image_url];
-    } catch {
-      imageUrls = [msg.image_url];
-    }
-  }
-
-  return (
-    <div style={{ marginTop: 6 }}>
-      {imageUrls.length > 0 && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: imageUrls.length === 1 ? "1fr" : "repeat(2, 1fr)",
-          gap: 6,
-        }}>
-          {imageUrls.map((url, idx) => (
-            <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
-              <img
-                src={url}
-                alt={`Attachment ${idx + 1}`}
-                style={{
-                  width: "100%",
-                  maxHeight: 240,
-                  objectFit: "cover",
-                  borderRadius: 8,
-                  border: "1px solid #E5E7EB",
-                  cursor: "pointer",
-                  display: "block",
-                }}
-              />
-            </a>
-          ))}
-        </div>
-      )}
-      {msg.document_url && (
-        <a
-          href={msg.document_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            marginTop: imageUrls.length > 0 ? 6 : 0,
-            color: "#D4A843",
-            fontSize: 12,
-            textDecoration: "underline",
-            fontWeight: 700,
-          }}
-        >
-          📄 View document →
-        </a>
-      )}
-    </div>
-  );
-}
-
 function AIMessage({ msg, showAvatar, viewerLang }: {
   msg: Message; showAvatar: boolean; viewerLang: string;
 }) {
@@ -531,7 +475,38 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
           <div style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
             {displayContent}
           </div>
-          <MessageAttachments msg={msg} />
+
+          {/* Inline uploaded image preview (pre-shipment photos, or image B/L) */}
+          {msg.image_url && (
+            <a
+              href={msg.image_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: "block", marginTop: 8 }}
+            >
+              <img
+                src={msg.image_url}
+                alt="Uploaded evidence"
+                style={{
+                  maxWidth: "100%", maxHeight: 220, borderRadius: 10,
+                  display: "block", border: "1px solid #E5E7EB", objectFit: "cover",
+                }}
+              />
+            </a>
+          )}
+
+          {/* Non-image document (e.g. PDF Bill of Lading) */}
+          {!msg.image_url && msg.document_url && (
+            <a
+              href={msg.document_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#D4A843", fontSize: 11.5, textDecoration: "underline", display: "block", marginTop: 6 }}
+            >
+              📄 View document →
+            </a>
+          )}
+
           {translated && !showOriginal && (
             <AutoTranslateLabel
               detectedLang={detectedLang}
@@ -594,7 +569,6 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
             <div style={{ color: "#fff", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
               {msg.content}
             </div>
-            <MessageAttachments msg={msg} />
           </div>
           <span style={{ color: "#9CA3AF", fontSize: 10, paddingRight: 4 }}>{formatTime(msg.created_at)}</span>
         </div>
@@ -633,7 +607,6 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
               {displayContent}
             </div>
           )}
-          <MessageAttachments msg={msg} />
           {translated && !translating && !showOriginal && (
             <AutoTranslateLabel
               detectedLang={detectedLang}
@@ -995,11 +968,10 @@ function FreightApprovalCard({ order, orderId, currentUser }: {
 
 // ─── SIMPLIFIED CHECKLIST PANEL ──────────────────────────────────────────────
 // FIXED: seedChecklist/loadChecklist no longer delete/reseed on every realtime
-// tick. The DB has already been cleaned of old 9-step rows via a one-time SQL
-// migration, so this now just seeds an empty checklist once, guarded against
-// concurrent calls with migratingRef.
-// UPDATED: pre-shipment photos now support multiple uploads (document_urls JSONB)
-// and every upload posts an inline chat message with image_url / document_url.
+// tick — they just seed an empty checklist once, guarded against concurrent
+// calls with seedingRef.
+// UPDATED: Pre-Shipment Photos supports multiple files (document_urls array).
+// UPDATED: every upload also posts into Chat Messages (image preview or doc link).
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
   orderId: string; currentUser: CurrentUser; isExporter: boolean;
   order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
@@ -1010,44 +982,45 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const fileRef = useRef<HTMLInputElement>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
-  const seededRef = useRef(false);
+  const seedingRef = useRef(false);
 
   const seedChecklist = async () => {
-    if (!isExporter || seededRef.current) return;
-    seededRef.current = true;
+    if (!isExporter || seedingRef.current) return;
 
-    const { data: existing } = await supabase
+    // Only seed if empty — don't touch existing rows
+    const { data: check } = await supabase
       .from("deal_checklist")
       .select("id")
       .eq("order_id", orderId)
       .limit(1);
 
-    if (existing && existing.length > 0) return;
+    if (check && check.length > 0) return;
 
-    const items = DEFAULT_CHECKLIST.map((step) => ({
-      order_id: orderId,
-      step_key: step.key,
-      step_label: step.label,
-      completed: false,
-      completed_at: null,
-      completed_by: null,
-      document_url: null,
-      document_name: null,
-      notes: null,
-      requires_document: step.requires_document,
-      icon: step.icon,
-      reference_number: null,
-      carrier_name: null,
-      document_verified: false,
-      verified_by: null,
-      verified_at: null,
-      document_urls: step.key === "pre_shipment_photos" ? [] : null,
-    }));
-
-    const { error } = await supabase.from("deal_checklist").insert(items);
-    if (error) {
-      console.error("Seed failed:", error);
-      seededRef.current = false;
+    seedingRef.current = true;
+    try {
+      const items = DEFAULT_CHECKLIST.map((step) => ({
+        order_id: orderId,
+        step_key: step.key,
+        step_label: step.label,
+        completed: false,
+        completed_at: null,
+        completed_by: null,
+        document_url: null,
+        document_name: null,
+        document_urls: [],
+        notes: null,
+        requires_document: step.requires_document,
+        icon: step.icon,
+        reference_number: null,
+        carrier_name: null,
+        document_verified: false,
+        verified_by: null,
+        verified_at: null,
+      }));
+      const { error } = await supabase.from("deal_checklist").insert(items);
+      if (error) console.error("Failed to seed checklist:", error);
+    } finally {
+      seedingRef.current = false;
     }
   };
 
@@ -1058,19 +1031,13 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
 
-    if (error) {
-      console.error("Load checklist error:", error);
-      return;
-    }
+    if (error || !data) return;
 
-    setChecklist(data as ChecklistItem[] || []);
+    setChecklist(data as ChecklistItem[]);
 
-    const shouldSeed = isExporter && [
-      "escrow_funded", "docs_in_progress", "goods_shipped",
-      "in_transit", "arrived", "delivered", "completed"
-    ].includes(order.order_status);
-
-    if ((!data || data.length === 0) && shouldSeed) {
+    if (data.length === 0 && isExporter && [
+      "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
+    ].includes(order.order_status)) {
       await seedChecklist();
     }
   };
@@ -1097,21 +1064,29 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
   const markComplete = async (step: ChecklistItem) => {
     if (!isExporter) return;
+    if (step.id.startsWith("preview-")) {
+      toast.error("Checklist is not active yet. Wait for escrow to be funded.");
+      return;
+    }
+    // Guard: already completed — don't duplicate messages or status updates
     if (step.completed) {
       toast.error("This step is already completed.");
       return;
     }
 
+    // Bill of Lading requires document upload first
     if (step.step_key === "bill_of_lading" && !step.document_url) {
       toast.error("Upload the Bill of Lading document first.");
       return;
     }
 
-    if (step.step_key === "pre_shipment_photos" && (!step.document_urls || step.document_urls.length === 0)) {
-      toast.error("Upload the pre-shipment photos first.");
+    // Pre-shipment photos requires at least one uploaded photo
+    if (step.step_key === MULTI_PHOTO_STEP && (!step.document_urls || step.document_urls.length === 0)) {
+      toast.error("Upload at least one pre-shipment photo first.");
       return;
     }
 
+    // Tracking step requires number and carrier
     if (step.step_key === "tracking_confirmed") {
       if (!trackingNumber.trim()) { toast.error("Enter the tracking number."); return; }
       if (!carrier) { toast.error("Select the carrier."); return; }
@@ -1132,7 +1107,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       if (error) throw error;
 
       const msgContent =
-        step.step_key === "pre_shipment_photos"
+        step.step_key === MULTI_PHOTO_STEP
           ? `📸 Pre-shipment photos uploaded and confirmed by the exporter. Goods are packed and ready for loading.`
           : step.step_key === "bill_of_lading"
           ? `🚢 Bill of Lading uploaded by the exporter. Goods are officially on a vessel.`
@@ -1151,73 +1126,64 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
     }
   };
 
-  const handleUpload = async (step: ChecklistItem) => {
-    const files = fileRef.current?.files;
+  // Handles both single-file steps (Bill of Lading) and multi-file steps
+  // (Pre-Shipment Photos). Every uploaded file also posts into Chat Messages
+  // so the buyer sees it live — image preview if it's a photo, a "View
+  // document" link otherwise.
+  const handleUpload = async (step: ChecklistItem, files: FileList) => {
     if (!files || files.length === 0) return;
     setUploading(true);
-
     try {
-      if (step.step_key === "pre_shipment_photos") {
-        const uploadedUrls: string[] = [];
+      const isMultiPhoto = step.step_key === MULTI_PHOTO_STEP;
+      const uploaded: ChecklistPhoto[] = [];
 
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const { data, error } = await supabase.storage.from("listings").upload(
-            `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
-            file, { cacheControl: "3600", upsert: false }
-          );
-          if (error) throw error;
-          const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
-          uploadedUrls.push(url);
-        }
-
-        const { data: existingData } = await supabase
-          .from("deal_checklist")
-          .select("document_urls")
-          .eq("id", step.id)
-          .single();
-
-        const existingUrls = existingData?.document_urls || [];
-        const allUrls = Array.isArray(existingUrls) ? [...existingUrls, ...uploadedUrls] : uploadedUrls;
-
-        const { error: updateErr } = await supabase.from("deal_checklist")
-          .update({ document_urls: allUrls })
-          .eq("id", step.id);
-        if (updateErr) throw updateErr;
-
-        await supabase.from("messages").insert({
-          order_id: orderId,
-          sender_type: "system",
-          is_ai: true,
-          content: `📸 ${uploadedUrls.length} pre-shipment photo(s) uploaded by exporter`,
-          image_url: JSON.stringify(uploadedUrls),
-        });
-
-        toast.success(`${uploadedUrls.length} photo(s) uploaded.`);
-      } else {
-        const file = files[0];
+      for (const file of Array.from(files)) {
+        const path = `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`;
         const { data, error } = await supabase.storage.from("listings").upload(
-          `documents/${orderId}/${step.step_key}/${Date.now()}_${file.name}`,
-          file, { cacheControl: "3600", upsert: false }
+          path, file, { cacheControl: "3600", upsert: false }
         );
         if (error) throw error;
         const url = supabase.storage.from("listings").getPublicUrl(data.path).data.publicUrl;
+        uploaded.push({ url, name: file.name });
+      }
 
+      if (uploaded.length === 0) return;
+
+      if (isMultiPhoto) {
+        const merged = [...(step.document_urls || []), ...uploaded];
         const { error: updateErr } = await supabase.from("deal_checklist")
-          .update({ document_url: url, document_name: file.name })
+          .update({
+            document_urls: merged,
+            document_url: merged[0].url,
+            document_name: merged[0].name,
+          })
           .eq("id", step.id);
         if (updateErr) throw updateErr;
+      } else {
+        const first = uploaded[0];
+        const { error: updateErr } = await supabase.from("deal_checklist")
+          .update({ document_url: first.url, document_name: first.name })
+          .eq("id", step.id);
+        if (updateErr) throw updateErr;
+      }
 
+      // Post each uploaded file into Chat Messages
+      for (const item of uploaded) {
+        const image = isImageFile(item.name);
+        const label = step.step_key === MULTI_PHOTO_STEP
+          ? "Pre-shipment photo uploaded"
+          : "Bill of Lading document uploaded";
         await supabase.from("messages").insert({
           order_id: orderId,
           sender_type: "system",
           is_ai: true,
-          content: `📄 ${step.step_label} uploaded by exporter`,
-          document_url: url,
+          content: `${step.step_key === MULTI_PHOTO_STEP ? "📸" : "🚢"} ${label}: ${item.name}`,
+          image_url: image ? item.url : null,
+          document_url: image ? null : item.url,
         });
-
-        toast.success("Document uploaded.");
       }
+
+      toast.success(uploaded.length > 1 ? `${uploaded.length} photos uploaded.` : "Document uploaded.");
     } catch (err: any) {
       toast.error(err?.message || "Upload failed.");
     } finally {
@@ -1228,23 +1194,19 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
   const completedCount = checklist.filter((c) => c.completed).length;
   const percent = checklist.length > 0 ? Math.round((completedCount / checklist.length) * 100) : 0;
+  const checklistEmpty = checklist.length === 0;
 
-  // If no rows yet, show nothing (seeding in progress)
-  if (checklist.length === 0) {
-    return (
-      <div ref={checklistRef} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <span style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", color: "#D4A843" }}>
-            📋 Shipment Checklist
-          </span>
-        </div>
-        <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>
-          <Spinner size={20} color="#D4A843" />
-          <div style={{ marginTop: 8 }}>Loading checklist…</div>
-        </div>
-      </div>
-    );
-  }
+  const stagedChecklist = checklistEmpty
+    ? DEFAULT_CHECKLIST.map((step) => ({
+        id: `preview-${step.key}`, order_id: orderId, step_key: step.key,
+        step_label: step.label, completed: false, completed_at: null,
+        completed_by: null, document_url: null, document_name: null,
+        document_urls: [], notes: null,
+        requires_document: step.requires_document, icon: step.icon,
+        created_at: order.created_at, reference_number: null, carrier_name: null,
+        document_verified: false, verified_by: null, verified_at: null,
+      }))
+    : checklist;
 
   return (
     <div ref={checklistRef} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
@@ -1255,14 +1217,14 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         </span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ color: "#9CA3AF", fontSize: 10 }}>
-            {completedCount} / {checklist.length}
+            {checklistEmpty ? "0" : `${completedCount} / ${checklist.length}`}
           </span>
           <span style={{ color: "#9CA3AF", fontSize: 10, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .25s" }}>▼</span>
         </div>
       </div>
 
       <div style={{ height: 4, background: "#E5E7EB", borderRadius: 2, marginBottom: 12 }}>
-        <div style={{ height: "100%", width: `${percent}%`, background: "linear-gradient(90deg, #D4A843, #B8890F)", borderRadius: 2, transition: "width .3s" }} />
+        <div style={{ height: "100%", width: `${checklistEmpty ? 0 : percent}%`, background: "linear-gradient(90deg, #D4A843, #B8890F)", borderRadius: 2, transition: "width .3s" }} />
       </div>
 
       {expanded && (
@@ -1278,11 +1240,16 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
           )}
 
           <div>
-            {checklist.map((step, index) => {
+            {stagedChecklist.map((step, index) => {
               const isCompleted = step.completed;
-              const isActive = !isCompleted && checklist.findIndex((item) => item.id === step.id) === completedCount;
+              const isActive = !isCompleted && (
+                checklistEmpty ? index === 0
+                : checklist.findIndex((item) => item.id === step.id) === completedCount
+              );
               const isTracking = step.step_key === "tracking_confirmed";
+              const isMultiPhoto = step.step_key === MULTI_PHOTO_STEP;
               const hint = DEFAULT_CHECKLIST.find(d => d.key === step.step_key)?.hint || "";
+              const photos = step.document_urls || [];
 
               return (
                 <div key={step.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
@@ -1301,6 +1268,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       {step.step_label}
                     </div>
 
+                    {/* Hint text for active step */}
                     {isActive && isExporter && hint && (
                       <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2, lineHeight: 1.5, fontStyle: "italic" }}>
                         {hint}
@@ -1313,6 +1281,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
+                    {/* Tracking info display */}
                     {isCompleted && isTracking && step.reference_number && (
                       <div style={{ marginTop: 4, fontSize: 11, color: "#374151" }}>
                         <div><strong>Tracking:</strong> {step.reference_number}</div>
@@ -1329,21 +1298,32 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       </div>
                     )}
 
-                    {step.step_key === "pre_shipment_photos" && step.document_urls && step.document_urls.length > 0 && (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 6 }}>
-                        {step.document_urls.map((url, idx) => (
-                          <a key={idx} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                    {/* Multi-photo thumbnail grid (Pre-Shipment Photos) */}
+                    {isMultiPhoto && photos.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        {photos.map((photo, i) => (
+                          <a
+                            key={`${photo.url}-${i}`}
+                            href={photo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ display: "block" }}
+                          >
                             <img
-                              src={url}
-                              alt={`Pre-shipment ${idx + 1}`}
-                              style={{ width: "100%", height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid #E5E7EB" }}
+                              src={photo.url}
+                              alt={photo.name}
+                              style={{
+                                width: 50, height: 50, objectFit: "cover",
+                                borderRadius: 8, border: "1px solid #E5E7EB",
+                              }}
                             />
                           </a>
                         ))}
                       </div>
                     )}
 
-                    {step.step_key !== "pre_shipment_photos" && step.document_url && (
+                    {/* Single document link (Bill of Lading) */}
+                    {!isMultiPhoto && step.document_url && (
                       isExporter ? (
                         <a href={step.document_url} target="_blank" rel="noopener noreferrer" style={{ color: "#D4A843", fontSize: 11, textDecoration: "underline", display: "block", marginTop: 2 }}>
                           View document →
@@ -1359,8 +1339,10 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       )
                     )}
 
-                    {isActive && isExporter && (
+                    {/* Active exporter controls */}
+                    {isActive && isExporter && !checklistEmpty && (
                       <div style={{ marginTop: 8 }}>
+                        {/* Tracking step inputs */}
                         {isTracking && (
                           <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
                             <input
@@ -1392,21 +1374,25 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                               <button
                                 onClick={() => fileRef.current?.click()}
                                 disabled={uploading}
-                                style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.6 : 1 }}
+                                style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: "pointer" }}
                               >
-                                {step.step_key === "pre_shipment_photos" && step.document_urls && step.document_urls.length > 0
-                                  ? "Add More Photos"
-                                  : step.step_key === "pre_shipment_photos"
-                                  ? "Upload Photos"
+                                {uploading
+                                  ? "Uploading…"
+                                  : isMultiPhoto
+                                  ? (photos.length > 0 ? "Add More Photos" : "Upload Photos")
                                   : "Upload Document"}
                               </button>
                               <input
                                 type="file"
-                                accept={step.step_key === "pre_shipment_photos" ? "image/*" : "image/*,application/pdf"}
+                                accept={isMultiPhoto ? "image/*" : "image/*,application/pdf"}
+                                multiple={isMultiPhoto}
                                 ref={fileRef}
                                 style={{ display: "none" }}
-                                onChange={() => handleUpload(step)}
-                                multiple={step.step_key === "pre_shipment_photos"}
+                                onChange={(e) => {
+                                  if (e.target.files && e.target.files.length > 0) {
+                                    handleUpload(step, e.target.files);
+                                  }
+                                }}
                               />
                             </>
                           )}
@@ -1424,6 +1410,12 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                 </div>
               );
             })}
+
+            {checklistEmpty && (
+              <div style={{ marginTop: 8, padding: 12, borderRadius: 12, border: "1px dashed #D1D5DB", color: "#6B7280", fontSize: 11, lineHeight: 1.5, textAlign: "center" }}>
+                The checklist activates when escrow is funded. Preview: Photos → Bill of Lading → Tracking Number.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1748,12 +1740,11 @@ export default function DealRoom() {
     }
   }, [order, isExporter, currentUser]);
 
-  // FIXED: atomic guard against duplicate "Payment secured" message.
+  // Atomic guard against duplicate "Payment secured" message.
   // Uses a `payment_message_sent` boolean column on `orders`. The UPDATE
   // only succeeds (returns a row) for the ONE caller that flips it from
   // false → true. Every other concurrent caller (realtime re-fires, extra
-  // renders, multiple tabs) gets zero rows back and skips the insert —
-  // no more select-then-insert race, no more repeated messages.
+  // renders, multiple tabs) gets zero rows back and skips the insert.
   useEffect(() => {
     if (order?.order_status !== "escrow_funded" || !orderId) return;
 
