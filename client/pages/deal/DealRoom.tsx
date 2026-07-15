@@ -1,6 +1,8 @@
 // src/pages/deal/DealRoom.tsx
 // UPDATED — Simplified checklist (pre-shipment photos + B/L + tracking only)
 // UPDATED — LibreTranslate integration via translate.argosopentech.com
+// UPDATED — Fixed checklist seeding race condition (no more delete/reseed loop)
+// UPDATED — Fixed duplicate "Payment secured" message (atomic DB-level guard)
 // All existing business logic, escrow, payment, dispute flow preserved
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
@@ -71,6 +73,7 @@ interface Order {
   escrow_fee_amount: number | null;
   platform_fee_amount: number | null;
   payment_confirmed_at: string | null;
+  payment_message_sent?: boolean;
   created_at: string;
   listing: {
     title: string;
@@ -919,6 +922,10 @@ function FreightApprovalCard({ order, orderId, currentUser }: {
 }
 
 // ─── SIMPLIFIED CHECKLIST PANEL ──────────────────────────────────────────────
+// FIXED: seedChecklist/loadChecklist no longer delete/reseed on every realtime
+// tick. The DB has already been cleaned of old 9-step rows via a one-time SQL
+// migration, so this now just seeds an empty checklist once, guarded against
+// concurrent calls with migratingRef.
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
   orderId: string; currentUser: CurrentUser; isExporter: boolean;
   order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
@@ -929,26 +936,12 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const fileRef = useRef<HTMLInputElement>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
+  const seedingRef = useRef(false);
 
   const seedChecklist = async () => {
-    if (!isExporter) return;
+    if (!isExporter || seedingRef.current) return;
 
-    // Check if existing items match the new simplified 3-step schema
-    const { data: existing } = await supabase
-      .from("deal_checklist")
-      .select("step_key")
-      .eq("order_id", orderId);
-
-    const hasOldItems = existing?.some((item: any) => 
-      !["pre_shipment_photos", "bill_of_lading", "tracking_confirmed"].includes(item.step_key)
-    );
-
-    // If old items exist (from previous 9-step version), delete and re-seed
-    if (hasOldItems) {
-      await supabase.from("deal_checklist").delete().eq("order_id", orderId);
-    }
-
-    // Only seed if empty or was just cleared
+    // Only seed if empty — don't touch existing rows
     const { data: check } = await supabase
       .from("deal_checklist")
       .select("id")
@@ -957,26 +950,31 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
     if (check && check.length > 0) return;
 
-    const items = DEFAULT_CHECKLIST.map((step) => ({
-      order_id: orderId,
-      step_key: step.key,
-      step_label: step.label,
-      completed: false,
-      completed_at: null,
-      completed_by: null,
-      document_url: null,
-      document_name: null,
-      notes: null,
-      requires_document: step.requires_document,
-      icon: step.icon,
-      reference_number: null,
-      carrier_name: null,
-      document_verified: false,
-      verified_by: null,
-      verified_at: null,
-    }));
-    const { error } = await supabase.from("deal_checklist").insert(items);
-    if (error) console.error("Failed to seed checklist:", error);
+    seedingRef.current = true;
+    try {
+      const items = DEFAULT_CHECKLIST.map((step) => ({
+        order_id: orderId,
+        step_key: step.key,
+        step_label: step.label,
+        completed: false,
+        completed_at: null,
+        completed_by: null,
+        document_url: null,
+        document_name: null,
+        notes: null,
+        requires_document: step.requires_document,
+        icon: step.icon,
+        reference_number: null,
+        carrier_name: null,
+        document_verified: false,
+        verified_by: null,
+        verified_at: null,
+      }));
+      const { error } = await supabase.from("deal_checklist").insert(items);
+      if (error) console.error("Failed to seed checklist:", error);
+    } finally {
+      seedingRef.current = false;
+    }
   };
 
   const loadChecklist = async () => {
@@ -985,37 +983,15 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .select("*")
       .eq("order_id", orderId)
       .order("created_at", { ascending: true });
-    if (!error && data) {
-      // Check if DB has old items from previous 9-step schema
-      const validKeys = ["pre_shipment_photos", "bill_of_lading", "tracking_confirmed"];
-      const hasOldItems = data.some((item: any) => !validKeys.includes(item.step_key));
 
-      if (hasOldItems) {
-        // Delete all old items and re-seed with correct 3-step checklist
-        await supabase.from("deal_checklist").delete().eq("order_id", orderId);
-        if (isExporter) {
-          await seedChecklist();
-          // Reload after seeding
-          const { data: fresh } = await supabase
-            .from("deal_checklist")
-            .select("*")
-            .eq("order_id", orderId)
-            .order("created_at", { ascending: true });
-          if (fresh) {
-            setChecklist(fresh as ChecklistItem[]);
-            return;
-          }
-        }
-        setChecklist([]);
-        return;
-      }
+    if (error || !data) return;
 
-      setChecklist(data as ChecklistItem[]);
-      if (data.length === 0 && isExporter && [
-        "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
-      ].includes(order.order_status)) {
-        await seedChecklist();
-      }
+    setChecklist(data as ChecklistItem[]);
+
+    if (data.length === 0 && isExporter && [
+      "escrow_funded", "docs_in_progress", "goods_shipped", "in_transit", "arrived", "delivered", "completed"
+    ].includes(order.order_status)) {
+      await seedChecklist();
     }
   };
 
@@ -1632,17 +1608,37 @@ export default function DealRoom() {
     }
   }, [order, isExporter, currentUser]);
 
+  // FIXED: atomic guard against duplicate "Payment secured" message.
+  // Uses a `payment_message_sent` boolean column on `orders`. The UPDATE
+  // only succeeds (returns a row) for the ONE caller that flips it from
+  // false → true. Every other concurrent caller (realtime re-fires, extra
+  // renders, multiple tabs) gets zero rows back and skips the insert —
+  // no more select-then-insert race, no more repeated messages.
   useEffect(() => {
     if (order?.order_status !== "escrow_funded" || !orderId) return;
+
     const ensurePaymentMessage = async () => {
-      const { data: existing } = await supabase.from("messages").select("id").eq("order_id", orderId).eq("sender_type", "system").ilike("content", "%Payment secured%").limit(1);
-      if (!existing || existing.length === 0) {
+      const { data, error } = await supabase
+        .from("orders")
+        .update({ payment_message_sent: true })
+        .eq("id", orderId)
+        .eq("payment_message_sent", false)
+        .select("id");
+
+      if (error) {
+        console.error("Failed to set payment_message_sent flag:", error);
+        return;
+      }
+
+      // Only the caller that actually flipped the flag gets a row back.
+      if (data && data.length > 0) {
         await supabase.from("messages").insert({
           order_id: orderId, sender_type: "system", is_ai: true,
           content: `🔒 Payment secured in PandasCrow escrow.\n\nExporter — your shipment checklist is now active. Upload photos, Bill of Lading, and tracking number to keep the buyer informed.\n\nBuyer — you will see live updates as the exporter completes each step.`,
         });
       }
     };
+
     ensurePaymentMessage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.order_status === "escrow_funded", orderId]);
