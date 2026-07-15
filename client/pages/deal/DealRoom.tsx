@@ -6,7 +6,7 @@
 // UPDATED — Pre-shipment photos now support multiple uploads + gallery grid
 // UPDATED — All uploads now post inline chat messages with image/document attachments
 
-import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { supabase } from '@/lib/supabase/client';
@@ -1010,55 +1010,44 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const fileRef = useRef<HTMLInputElement>(null);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [carrier, setCarrier] = useState("");
-  const seedingRef = useRef(false);
-  const hasSeeded = useRef(false);
+  const seededRef = useRef(false);
 
   const seedChecklist = async () => {
-    if (!isExporter || seedingRef.current || hasSeeded.current) return;
-    
-    // Double-check: another tab/client may have seeded while we loaded
-    const { data: check } = await supabase
+    if (!isExporter || seededRef.current) return;
+    seededRef.current = true;
+
+    const { data: existing } = await supabase
       .from("deal_checklist")
       .select("id")
       .eq("order_id", orderId)
       .limit(1);
 
-    if (check && check.length > 0) {
-      hasSeeded.current = true;
-      return;
-    }
+    if (existing && existing.length > 0) return;
 
-    seedingRef.current = true;
-    try {
-      const items = DEFAULT_CHECKLIST.map((step) => ({
-        order_id: orderId,
-        step_key: step.key,
-        step_label: step.label,
-        completed: false,
-        completed_at: null,
-        completed_by: null,
-        document_url: null,
-        document_name: null,
-        notes: null,
-        requires_document: step.requires_document,
-        icon: step.icon,
-        reference_number: null,
-        carrier_name: null,
-        document_verified: false,
-        verified_by: null,
-        verified_at: null,
-        document_urls: step.key === "pre_shipment_photos" ? [] : null,
-      }));
-      const { error } = await supabase.from("deal_checklist").insert(items);
-      if (error) {
-        console.error("Failed to seed checklist:", error);
-      } else {
-        hasSeeded.current = true;
-        // Force immediate reload instead of waiting for realtime
-        await loadChecklist();
-      }
-    } finally {
-      seedingRef.current = false;
+    const items = DEFAULT_CHECKLIST.map((step) => ({
+      order_id: orderId,
+      step_key: step.key,
+      step_label: step.label,
+      completed: false,
+      completed_at: null,
+      completed_by: null,
+      document_url: null,
+      document_name: null,
+      notes: null,
+      requires_document: step.requires_document,
+      icon: step.icon,
+      reference_number: null,
+      carrier_name: null,
+      document_verified: false,
+      verified_by: null,
+      verified_at: null,
+      document_urls: step.key === "pre_shipment_photos" ? [] : null,
+    }));
+
+    const { error } = await supabase.from("deal_checklist").insert(items);
+    if (error) {
+      console.error("Seed failed:", error);
+      seededRef.current = false;
     }
   };
 
@@ -1070,36 +1059,31 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
       .order("created_at", { ascending: true });
 
     if (error) {
-      console.error("loadChecklist error:", error);
+      console.error("Load checklist error:", error);
       return;
     }
 
     setChecklist(data as ChecklistItem[] || []);
 
-    // If empty and should have data, trigger seed
-    const shouldHaveChecklist = isExporter && [
-      "escrow_funded", "docs_in_progress", "goods_shipped", 
+    const shouldSeed = isExporter && [
+      "escrow_funded", "docs_in_progress", "goods_shipped",
       "in_transit", "arrived", "delivered", "completed"
     ].includes(order.order_status);
 
-    if ((!data || data.length === 0) && shouldHaveChecklist && !hasSeeded.current) {
+    if ((!data || data.length === 0) && shouldSeed) {
       await seedChecklist();
     }
   };
 
   useEffect(() => {
     loadChecklist();
-    
     const channel = supabase
       .channel(`deal-checklist-${orderId}`)
       .on("postgres_changes", {
         event: "*", schema: "public", table: "deal_checklist",
         filter: `order_id=eq.${orderId}`,
-      }, () => {
-        loadChecklist();
-      })
+      }, () => loadChecklist())
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [orderId]);
 
@@ -1113,10 +1097,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
 
   const markComplete = async (step: ChecklistItem) => {
     if (!isExporter) return;
-    if (step.id.startsWith("preview-")) {
-      toast.error("Checklist is not active yet. Wait for escrow to be funded.");
-      return;
-    }
     if (step.completed) {
       toast.error("This step is already completed.");
       return;
@@ -1249,18 +1229,22 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const completedCount = checklist.filter((c) => c.completed).length;
   const percent = checklist.length > 0 ? Math.round((completedCount / checklist.length) * 100) : 0;
 
-  // Use real checklist rows if they exist, otherwise show preview
-  const displayChecklist = checklist.length > 0 ? checklist : DEFAULT_CHECKLIST.map((step) => ({
-    id: `preview-${step.key}`, order_id: orderId, step_key: step.key,
-    step_label: step.label, completed: false, completed_at: null,
-    completed_by: null, document_url: null, document_name: null, notes: null,
-    requires_document: step.requires_document, icon: step.icon,
-    created_at: order.created_at, reference_number: null, carrier_name: null,
-    document_verified: false, verified_by: null, verified_at: null,
-    document_urls: null,
-  }));
-
-  const isPreview = checklist.length === 0;
+  // If no rows yet, show nothing (seeding in progress)
+  if (checklist.length === 0) {
+    return (
+      <div ref={checklistRef} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", color: "#D4A843" }}>
+            📋 Shipment Checklist
+          </span>
+        </div>
+        <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>
+          <Spinner size={20} color="#D4A843" />
+          <div style={{ marginTop: 8 }}>Loading checklist…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={checklistRef} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
@@ -1271,14 +1255,14 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
         </span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ color: "#9CA3AF", fontSize: 10 }}>
-            {isPreview ? "0" : `${completedCount} / ${checklist.length}`}
+            {completedCount} / {checklist.length}
           </span>
           <span style={{ color: "#9CA3AF", fontSize: 10, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .25s" }}>▼</span>
         </div>
       </div>
 
       <div style={{ height: 4, background: "#E5E7EB", borderRadius: 2, marginBottom: 12 }}>
-        <div style={{ height: "100%", width: `${isPreview ? 0 : percent}%`, background: "linear-gradient(90deg, #D4A843, #B8890F)", borderRadius: 2, transition: "width .3s" }} />
+        <div style={{ height: "100%", width: `${percent}%`, background: "linear-gradient(90deg, #D4A843, #B8890F)", borderRadius: 2, transition: "width .3s" }} />
       </div>
 
       {expanded && (
@@ -1294,12 +1278,9 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
           )}
 
           <div>
-            {displayChecklist.map((step, index) => {
+            {checklist.map((step, index) => {
               const isCompleted = step.completed;
-              const isActive = !isCompleted && (
-                isPreview ? index === 0
-                : checklist.findIndex((item) => item.id === step.id) === completedCount
-              );
+              const isActive = !isCompleted && checklist.findIndex((item) => item.id === step.id) === completedCount;
               const isTracking = step.step_key === "tracking_confirmed";
               const hint = DEFAULT_CHECKLIST.find(d => d.key === step.step_key)?.hint || "";
 
@@ -1378,8 +1359,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                       )
                     )}
 
-                    {/* CRITICAL FIX: Show controls for real rows (not preview) when active and exporter */}
-                    {isActive && isExporter && !isPreview && (
+                    {isActive && isExporter && (
                       <div style={{ marginTop: 8 }}>
                         {isTracking && (
                           <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
@@ -1444,12 +1424,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
                 </div>
               );
             })}
-
-            {isPreview && (
-              <div style={{ marginTop: 8, padding: 12, borderRadius: 12, border: "1px dashed #D1D5DB", color: "#6B7280", fontSize: 11, lineHeight: 1.5, textAlign: "center" }}>
-                The checklist activates when escrow is funded. Preview: Photos → Bill of Lading → Tracking Number.
-              </div>
-            )}
           </div>
         </div>
       )}
