@@ -156,33 +156,7 @@ const DEFAULT_CHECKLIST = [
   },
 ];
 
-const seedDealChecklistRows = async (orderId: string) => {
-  const items = DEFAULT_CHECKLIST.map((step) => ({
-    order_id: orderId,
-    step_key: step.key,
-    step_label: step.label,
-    completed: false,
-    completed_at: null,
-    completed_by: null,
-    document_url: null,
-    document_urls: [],
-    document_name: null,
-    notes: null,
-    requires_document: step.requires_document,
-    icon: step.icon,
-    reference_number: null,
-    carrier_name: null,
-    document_verified: false,
-    verified_by: null,
-    verified_at: null,
-  }));
-
-  const { error } = await supabase
-    .from("deal_checklist")
-    .upsert(items, { onConflict: "order_id,step_key" });
-
-  if (error) throw error;
-};
+ 
 
 const MULTI_UPLOAD_STEPS = new Set<ChecklistItem["step_key"]>(["pre_shipment_photos", "bill_of_lading"]);
 
@@ -980,16 +954,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const [previewStep, setPreviewStep] = useState<ChecklistItem | null>(null);
 
   // FIX 1: Use upsert so the frontend can safely seed checklist rows
-  // even if the database trigger already inserted them.
-  const seedChecklist = async () => {
-    if (!isExporter) return;
-    try {
-      await seedDealChecklistRows(orderId);
-    } catch (error) {
-      console.error("Failed to seed checklist:", error);
-    }
-  };
-
+  // even if the database trigger already inserted the 
   const loadChecklist = async () => {
     const { data, error } = await supabase
       .from("deal_checklist")
@@ -1007,18 +972,7 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
             : [],
       }));
       setChecklist(normalized);
-      // FIX 1: Try to seed if empty AND status is in escrow-active range
-      // This handles cases where DB trigger ran but frontend missed it
-      if (normalized.length === 0 && isExporter && ESCROW_ACTIVE_STATUSES.includes(order.order_status)) {
-        await seedChecklist();
-        // Reload after seeding
-        const { data: fresh } = await supabase
-          .from("deal_checklist")
-          .select("*")
-          .eq("order_id", orderId)
-          .order("created_at", { ascending: true });
-        if (fresh) setChecklist(fresh as ChecklistItem[]);
-      }
+       
     }
   };
 
@@ -1499,12 +1453,7 @@ export default function DealRoom() {
       console.error("Failed to normalize escrow state:", err);
     }
 
-    try {
-      await seedDealChecklistRows(orderId);
-    } catch (err) {
-      console.error("Failed to seed checklist after payment:", err);
-    }
-
+     
     try {
       const { data: existingPaymentMessages } = await supabase
         .from("messages")
