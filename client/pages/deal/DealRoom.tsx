@@ -5,6 +5,19 @@
 // 3. Buyer auto-switches to Actions tab after payment (escrow_funded) not just goods_shipped
 // 4. DeliveryConfirmPanel visibility correctly tied to checklist completion chain
 // 5. Payment message check is more resilient
+//
+// NEW: Quantity negotiation support.
+// - Added requested_quantity, quantity_unit, unit_price, subtotal, quantity_locked to Order interface.
+// - Added QuantitySummary card in Deal Actions with edit capability before escrow is funded.
+// - Updates order row and inserts order_quantity_history and system message.
+// - All totals use negotiated quantity.
+// - Quantity locked after escrow_funded or completed.
+// - Freight re-quote note shown when quantity changes after freight is quoted.
+// - Fixed TypeScript error: removed unnecessary nullish coalescing on non-nullish fields.
+// - Exporter sees read-only quantity card; buyer sees edit button only if not locked.
+// - AI welcome message is automatically seeded with the order's creation time so it appears first.
+// - Buyer request summary message is automatically seeded as a separate message after the welcome.
+// - Translation layer removed. Messages are displayed in the sender's original language.
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -21,7 +34,6 @@ interface Message {
   is_ai: boolean;
   is_blocked?: boolean;
   created_at: string;
-  translatedContent?: string;
 }
 
 interface ChecklistItem {
@@ -97,6 +109,12 @@ interface Order {
     verified: boolean;
     business_state?: string;
   } | null;
+  // NEW quantity negotiation fields
+  requested_quantity?: number | null;
+  quantity_unit?: string | null;
+  unit_price?: number | null;
+  subtotal?: number | null;
+  quantity_locked?: boolean | null;
 }
 
 interface CurrentUser {
@@ -170,6 +188,7 @@ const isImageUrl = (url: string) => /\.(png|jpe?g|gif|webp|bmp|avif)(\?|#|$)/i.t
 const isPdfUrl = (url: string) => /\.pdf(\?|#|$)/i.test(url);
 
 // ─── LANGUAGE NAMES ───────────────────────────────────────────────────────────
+// (Kept for possible future use, but translation is removed)
 const LANG_NAMES: Record<string, string> = {
   zh: "Chinese", hi: "Hindi", ar: "Arabic", fr: "French",
   de: "German", pt: "Portuguese", tr: "Turkish", ja: "Japanese",
@@ -177,48 +196,9 @@ const LANG_NAMES: Record<string, string> = {
   nl: "Dutch", vi: "Vietnamese", th: "Thai", en: "English",
 };
 
-// ─── LIBRE TRANSLATE — AUTO DETECT + TRANSLATE ────────────────────────────────
-const LIBRE_BASE = "https://translate.argosopentech.com";
-
-const detectLanguage = async (text: string): Promise<string> => {
-  if (!text || text.length < 4) return "en";
-  try {
-    const res = await fetch(`${LIBRE_BASE}/detect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: text }),
-    });
-    if (!res.ok) return "en";
-    const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      const best = data.sort((a: any, b: any) => b.confidence - a.confidence)[0];
-      return best.language || "en";
-    }
-    return "en";
-  } catch { return "en"; }
-};
-
-const translateText = async (text: string, sourceLang: string, targetLang: string): Promise<string> => {
-  if (!text || sourceLang === targetLang) return text;
-  try {
-    const res = await fetch(`${LIBRE_BASE}/translate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: text, source: sourceLang, target: targetLang }),
-    });
-    if (!res.ok) return text;
-    const data = await res.json();
-    return data.translatedText || text;
-  } catch { return text; }
-};
-
-const autoTranslate = async (text: string, viewerLang: string): Promise<{ translated: string; detectedLang: string } | null> => {
-  const detected = await detectLanguage(text);
-  if (detected === viewerLang || (detected === "en" && viewerLang === "en")) return null;
-  const translated = await translateText(text, detected, viewerLang);
-  if (!translated || translated === text) return null;
-  return { translated, detectedLang: detected };
-};
+// ─── LIBRE TRANSLATE — REMOVED ──────────────────────────────────────────────
+// All translation functions have been removed.
+// Messages are displayed in the sender's original language.
 
 const BUYER_ESCROW_FEE_RATE = 0.045;
 const EXPORTER_PLATFORM_FEE_RATE = 0.03;
@@ -501,23 +481,9 @@ function RichMessageText({ text, style }: { text: string; style: CSSProperties }
   );
 }
 
-function AIMessage({ msg, showAvatar, viewerLang }: {
-  msg: Message; showAvatar: boolean; viewerLang: string; key?: string;
+function AIMessage({ msg, showAvatar }: {
+  msg: Message; showAvatar: boolean; key?: string;
 }) {
-  const [translated, setTranslated] = useState("");
-  const [detectedLang, setDetectedLang] = useState("");
-  const [showOriginal, setShowOriginal] = useState(false);
-
-  useEffect(() => {
-    if (viewerLang && viewerLang !== "en") {
-      translateText(msg.content, "en", viewerLang).then((t) => {
-        if (t && t !== msg.content) { setTranslated(t); setDetectedLang("en"); }
-      });
-    }
-  }, [msg.content, viewerLang]);
-
-  const displayContent = !showOriginal && translated ? translated : msg.content;
-
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
       {showAvatar ? <Avatar label="AI" type="ai" size={30} /> : <div style={{ width: 30 }} />}
@@ -528,9 +494,7 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
           </span>
         )}
         <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
-          <RichMessageText text={displayContent} style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7 }} />
-          {translated && !showOriginal && <AutoTranslateLabel detectedLang={detectedLang} onShowOriginal={() => setShowOriginal(true)} />}
-          {showOriginal && <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>Show translation</button>}
+          <RichMessageText text={msg.content} style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7 }} />
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -538,28 +502,10 @@ function AIMessage({ msg, showAvatar, viewerLang }: {
   );
 }
 
-function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: {
+function UserMessage({ msg, isOwn, senderName, showAvatar, order }: {
   msg: Message; isOwn: boolean; senderName: string;
-  showAvatar: boolean; order: Order; viewerLang: string; key?: string;
+  showAvatar: boolean; order: Order; key?: string;
 }) {
-  const [translated, setTranslated] = useState("");
-  const [detectedLang, setDetectedLang] = useState("");
-  const [showOriginal, setShowOriginal] = useState(false);
-  const [translating, setTranslating] = useState(false);
-
-  useEffect(() => {
-    if (isOwn) return;
-    const run = async () => {
-      setTranslating(true);
-      const result = await autoTranslate(msg.content, viewerLang || "en");
-      if (result) { setTranslated(result.translated); setDetectedLang(result.detectedLang); }
-      setTranslating(false);
-    };
-    run();
-  }, [msg.content, isOwn, viewerLang]);
-
-  const displayContent = !showOriginal && translated ? translated : msg.content;
-
   if (isOwn) {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end", margin: "3px 0" }}>
@@ -586,16 +532,7 @@ function UserMessage({ msg, isOwn, senderName, showAvatar, order, viewerLang }: 
       <div style={{ maxWidth: "78%", display: "flex", flexDirection: "column", gap: 3 }}>
         {showAvatar && <span style={{ color: "#6B7280", fontSize: 10.5, paddingLeft: 2 }}>{senderName}</span>}
         <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
-          {translating ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <RichMessageText text={msg.content} style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }} />
-              <Spinner size={10} color="#D4A843" />
-            </div>
-          ) : (
-            <RichMessageText text={displayContent} style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }} />
-          )}
-          {translated && !translating && !showOriginal && <AutoTranslateLabel detectedLang={detectedLang} onShowOriginal={() => setShowOriginal(true)} />}
-          {showOriginal && <button onClick={() => setShowOriginal(false)} style={{ background: "none", border: "none", color: "#D4A843", fontSize: 10, cursor: "pointer", padding: 0, marginTop: 4 }}>Show translation</button>}
+          <RichMessageText text={msg.content} style={{ color: "#111827", fontSize: 14, lineHeight: 1.55 }} />
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -938,9 +875,171 @@ function FreightApprovalCard({ order, orderId, currentUser }: { order: Order; or
   );
 }
 
-// ─── FIX 1: CHECKLIST PANEL ──────────────────────────────────────────────────
-// seedChecklist now uses UPSERT (ignoreDuplicates) to avoid conflict with DB trigger
-// This means both the DB trigger AND frontend can try to seed — only one will win, no error
+// ─── NEW: Quantity Negotiation Component ─────────────────────────────────────────
+function QuantitySummary({ order, currentUser, onUpdate }: { order: Order; currentUser: CurrentUser; onUpdate: () => void; }) {
+  const [editing, setEditing] = useState(false);
+  const [newQuantity, setNewQuantity] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Compute current values
+  const unitPrice = order.unit_price ?? order.listing.price_per_unit ?? 0;
+  const currentQuantity = order.requested_quantity ?? order.quantity;
+  const subtotal = order.subtotal ?? (Number.isFinite(currentQuantity) && Number.isFinite(unitPrice) ? currentQuantity * unitPrice : 0);
+  const unit = order.quantity_unit ?? order.listing.unit ?? "";
+  const minQty = order.listing.min_order_quantity ?? 0;
+  const isLocked = order.quantity_locked || ESCROW_ACTIVE_STATUSES.includes(order.order_status) || order.order_status === 'completed' || order.order_status === 'disputed';
+
+  const isBuyer = currentUser.id === order.buyer_id;
+  const isExporter = currentUser.id === order.exporter_id;
+
+  const freightQuoted = Boolean(order.freight_company && order.freight_cost !== null && order.freight_cost !== undefined);
+  const showFreightNote = freightQuoted && !isLocked && isBuyer;
+
+  const handleEdit = () => {
+    setNewQuantity(String(currentQuantity));
+    setEditing(true);
+  };
+
+  const handleSubmit = async () => {
+    const qty = Number(newQuantity);
+    if (isNaN(qty) || qty < minQty) {
+      toast.error(`Quantity must be at least ${minQty} ${unit}.`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const newSubtotal = qty * unitPrice;
+      const oldQty = currentQuantity;
+      const oldSubtotal = oldQty * unitPrice;
+      const { error } = await supabase.from("orders").update({
+        requested_quantity: qty,
+        subtotal: newSubtotal,
+        total_amount: newSubtotal, // goods value
+        quantity_unit: unit,
+        unit_price: unitPrice,
+        quantity_locked: false,
+      }).eq("id", order.id);
+      if (error) throw error;
+
+      // Insert history
+      await supabase.from("order_quantity_history").insert({
+        order_id: order.id,
+        old_quantity: oldQty,
+        new_quantity: qty,
+        changed_by: currentUser.id,
+        changed_at: new Date().toISOString(),
+      });
+
+      // System message
+      await supabase.from("messages").insert({
+        order_id: order.id,
+        sender_type: "system",
+        is_ai: true,
+        content: `📦 Quantity updated.
+
+Old:
+${oldQty} ${unit}
+
+New:
+${qty} ${unit}
+
+Subtotal updated:
+${formatMoney(oldSubtotal, order.currency)}
+↓
+${formatMoney(newSubtotal, order.currency)}`,
+      });
+
+      toast.success("Quantity updated.");
+      setEditing(false);
+      onUpdate();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update quantity.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", color: "#111827" }}>
+            📦 Quantity & Pricing
+          </span>
+          {isBuyer && !isLocked && (
+            <button onClick={handleEdit} style={{ background: "none", border: "1px solid #D4A843", borderRadius: 6, padding: "4px 10px", color: "#D4A843", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>
+              Edit
+            </button>
+          )}
+          {isBuyer && isLocked && (
+            <span style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 700, background: "#F3F4F6", padding: "2px 8px", borderRadius: 4 }}>🔒 Locked</span>
+          )}
+          {isExporter && (
+            <span style={{ fontSize: 10, color: "#6B7280", fontWeight: 500 }}>Requested by Buyer</span>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#6B7280", fontSize: 12 }}>Unit price</span>
+            <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{formatMoney(unitPrice, order.currency)} / {unit}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#6B7280", fontSize: 12 }}>{isExporter ? "Requested quantity" : "Your requested quantity"}</span>
+            <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{currentQuantity} {unit}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#6B7280", fontSize: 12 }}>Subtotal</span>
+            <span style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{formatMoney(subtotal, order.currency)}</span>
+          </div>
+          {isExporter && (
+            <div style={{ marginTop: 8, padding: 12, background: "#F9FAFB", borderRadius: 8, fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>
+              The buyer requested this quantity. You may discuss changes in chat.
+              If a different quantity is agreed, ask the buyer to update it before payment.
+            </div>
+          )}
+          {!isLocked && !isExporter && (
+            <div style={{ color: "#6B7280", fontSize: 11, marginTop: 4, fontStyle: "italic" }}>
+              Minimum order: {minQty} {unit}
+            </div>
+          )}
+          {showFreightNote && (
+            <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#92400E", marginTop: 6 }}>
+              ⚠️ Freight quote is already set. Changing quantity may affect shipping costs. Consider re‑quoting freight after quantity change.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <BottomSheet open={editing} onClose={() => setEditing(false)} title="Edit Quantity">
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.7 }}>
+            Enter new quantity. Unit price remains {formatMoney(unitPrice, order.currency)} / {unit}.
+          </div>
+          <div>
+            <div style={{ color: "#6B7280", fontSize: 10.5, marginBottom: 4 }}>Quantity ({unit})</div>
+            <input
+              type="number"
+              value={newQuantity}
+              onChange={(e) => setNewQuantity(e.target.value)}
+              min={minQty}
+              style={{ width: "100%", padding: "10px 12px", background: "#F9FAFB", border: "1px solid #D1D5DB", borderRadius: 10, color: "#111827", fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }}
+            />
+            <div style={{ color: "#9CA3AF", fontSize: 11, marginTop: 4 }}>Minimum: {minQty} {unit}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => setEditing(false)} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#F3F4F6", border: "none", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+            <button onClick={handleSubmit} disabled={submitting} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#D4A843", border: "none", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              {submitting ? <Spinner size={14} color="#fff" /> : "Update Quantity"}
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
+    </>
+  );
+}
+
+// ─── CHECKLIST PANEL ──────────────────────────────────────────────────────────
 function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef }: {
   orderId: string; currentUser: CurrentUser; isExporter: boolean;
   order: Order; checklistRef?: React.RefObject<HTMLDivElement>;
@@ -953,8 +1052,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
   const [carrier, setCarrier] = useState("");
   const [previewStep, setPreviewStep] = useState<ChecklistItem | null>(null);
 
-  // FIX 1: Use upsert so the frontend can safely seed checklist rows
-  // even if the database trigger already inserted the 
   const loadChecklist = async () => {
     const { data, error } = await supabase
       .from("deal_checklist")
@@ -972,7 +1069,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
             : [],
       }));
       setChecklist(normalized);
-       
     }
   };
 
@@ -988,7 +1084,6 @@ function ChecklistPanel({ orderId, currentUser, isExporter, order, checklistRef 
     return () => { supabase.removeChannel(channel); };
   }, [orderId, order.order_status]);
 
-  // Also reload when order status changes to escrow_funded
   useEffect(() => {
     if (ESCROW_ACTIVE_STATUSES.includes(order.order_status)) {
       loadChecklist();
@@ -1308,9 +1403,6 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
     );
   }
 
-  // FIX 4: Show delivery confirm for goods_shipped, delivered, completed
-  // This renders AFTER the checklist — once tracking_confirmed is done,
-  // order_status becomes goods_shipped and this panel appears
   if (!["goods_shipped", "delivered", "completed"].includes(order.order_status)) return null;
 
   return (
@@ -1447,13 +1539,13 @@ export default function DealRoom() {
           order_status: "escrow_funded",
           escrow_status: "funded",
           payment_confirmed_at: freshOrder.payment_confirmed_at || new Date().toISOString(),
+          quantity_locked: true, // lock quantity after escrow funded
         }).eq("id", orderId);
       }
     } catch (err) {
       console.error("Failed to normalize escrow state:", err);
     }
 
-     
     try {
       const { data: existingPaymentMessages } = await supabase
         .from("messages")
@@ -1522,11 +1614,64 @@ Buyer — you will see live updates as the exporter completes each step.`,
     setMessages((data || []) as Message[]);
   };
 
-  const seedWelcomeMessage = async (dealId: string) => {
-    const { data } = await supabase.from("messages").select("id").eq("order_id", dealId).limit(1);
-    if (!data || data.length === 0) {
-      await supabase.from("messages").insert({ order_id: dealId, sender_type: "ai", is_ai: true, content: AI_WELCOME });
+  const seedWelcomeMessage = async (dealId: string, orderData: Order) => {
+    // Check if the welcome message already exists by looking for the exact content
+    const { data: existing } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("order_id", dealId)
+      .eq("content", AI_WELCOME)
+      .limit(1);
+    if (!existing || existing.length === 0) {
+      await supabase.from("messages").insert({
+        order_id: dealId,
+        sender_type: "ai",
+        is_ai: true,
+        content: AI_WELCOME,
+        // Use the order's creation time so this message appears BEFORE the summary
+        created_at: orderData.created_at,
+      });
     }
+  };
+
+  const seedBuyerRequestSummary = async (dealId: string, orderData: Order) => {
+    // Check if a summary already exists (look for a system message containing "Buyer requested:")
+    const { data: existing } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("order_id", dealId)
+      .eq("sender_type", "system")
+      .ilike("content", "Buyer requested:%")
+      .limit(1);
+
+    if (existing && existing.length > 0) return; // already exists
+
+    // Build summary only if we have requested quantity and unit price
+    const requestedQty = orderData.requested_quantity ?? orderData.quantity;
+    const unitPrice = orderData.unit_price ?? orderData.listing.price_per_unit;
+    const subtotal = orderData.subtotal ?? (requestedQty * unitPrice);
+    const unit = orderData.quantity_unit ?? orderData.listing.unit;
+
+    if (!requestedQty || !unitPrice) return; // no data to show
+
+    const summary = `Buyer requested:
+
+${requestedQty} ${unit}
+
+Unit Price:
+${formatMoney(unitPrice, orderData.currency)}
+
+Estimated Goods Value:
+${formatMoney(subtotal, orderData.currency)}
+
+Waiting for exporter response.`;
+
+    await supabase.from("messages").insert({
+      order_id: dealId,
+      sender_type: "system",
+      is_ai: true,
+      content: summary,
+    });
   };
 
   useEffect(() => {
@@ -1539,7 +1684,7 @@ Buyer — you will see live updates as the exporter completes each step.`,
     }
   }, [order, currentUser]);
 
-  // FIX 3 + FIX 5: Switch buyer to Actions tab after payment (escrow_funded) AND goods_shipped
+  // Switch buyer to Actions tab after payment (escrow_funded) and goods_shipped
   useEffect(() => {
     if (!isBuyer || !order) return;
     const escrowActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
@@ -1562,12 +1707,10 @@ Buyer — you will see live updates as the exporter completes each step.`,
     }
   }, [order, isExporter, currentUser]);
 
-  // FIX 5: Ensure payment message is inserted after escrow_funded
-  // Also polls for it to handle timing issues with Pandascrow callback
+  // Ensure payment message is inserted after escrow_funded
   useEffect(() => {
     if (order?.order_status !== "escrow_funded" || !orderId) return;
     const ensurePaymentMessage = async () => {
-      // Check if ANY system message about payment exists
       const { data: existing } = await supabase
         .from("messages")
         .select("id")
@@ -1575,7 +1718,6 @@ Buyer — you will see live updates as the exporter completes each step.`,
         .eq("sender_type", "system")
         .limit(5);
 
-      const hasPaymentMsg = (existing || []).some(m => true); // system msg exists = payment confirmed
       if (!existing || existing.length === 0) {
         await supabase.from("messages").insert({
           order_id: orderId, sender_type: "system", is_ai: true,
@@ -1620,7 +1762,12 @@ Buyer — you will see live updates as the exporter completes each step.`,
         });
         setViewerLang(profile.preferred_language || "en");
         setOrder(orderData as Order);
-        await seedWelcomeMessage(orderId);
+
+        // Seed welcome message first
+        await seedWelcomeMessage(orderId, orderData);
+        // Then seed buyer request summary
+        await seedBuyerRequestSummary(orderId, orderData);
+
         await fetchMessages(orderId);
       } catch (err) {
         toast.error("Unable to load deal room.");
@@ -1774,8 +1921,6 @@ Buyer — you will see live updates as the exporter completes each step.`,
     renderItems.push({ kind: "msg", msg, key: msg.id, showAvatar });
   });
 
-  // FIX 2: Checklist always visible for both parties when escrow is active
-  // No more "showChecklist" toggle needed — auto-shows when status is right
   const escrowIsActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
 
   return (
@@ -1853,13 +1998,13 @@ Buyer — you will see live updates as the exporter completes each step.`,
                   );
                 }
                 if (msg.is_ai || msg.sender_type === "system") {
-                  return <AIMessage key={item.key} msg={msg} showAvatar={item.showAvatar} viewerLang={viewerLang} />;
+                  return <AIMessage key={item.key} msg={msg} showAvatar={item.showAvatar} />;
                 }
                 const own = msg.sender_type === (isBuyer ? "buyer" : "exporter");
                 return (
                   <UserMessage key={item.key} msg={msg} isOwn={own}
                     senderName={msg.sender_type === "buyer" ? order.buyer?.company_name || "Buyer" : order.exporter?.company_name || "Exporter"}
-                    showAvatar={item.showAvatar} order={order} viewerLang={viewerLang} />
+                    showAvatar={item.showAvatar} order={order} />
                 );
               })}
               <div ref={messagesEndRef} />
@@ -1879,6 +2024,9 @@ Buyer — you will see live updates as the exporter completes each step.`,
           </>
         ) : (
           <div style={{ flex: 1, height: "calc(100dvh - 160px)", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "14px", display: "grid", gap: 12, paddingBottom: "max(40px, env(safe-area-inset-bottom, 24px))" }}>
+            {/* NEW: Quantity Summary Card */}
+            <QuantitySummary order={order} currentUser={currentUser} onUpdate={() => refetchOrder()} />
+
             {isExporter && (!order.freight_company || order.order_status === FREIGHT_CHANGE_REQUESTED_STATUS) && (
               <FreightQuoteForm order={order} onSubmitted={() => refetchOrder()} />
             )}
@@ -1935,7 +2083,6 @@ Buyer — you will see live updates as the exporter completes each step.`,
                   </div>
                 )}
 
-                {/* FIX 2: Escrow confirmation banner */}
                 {isBuyer && (
                   <div style={{ background: "#ECFDF5", borderRadius: 16, border: "1px solid #A7F3D0", padding: 16, boxSizing: "border-box", width: "100%", textAlign: "center" }}>
                     <div style={{ fontSize: 18, marginBottom: 8 }}>✅</div>
@@ -1948,7 +2095,6 @@ Buyer — you will see live updates as the exporter completes each step.`,
                   </div>
                 )}
 
-                {/* FIX 2: Checklist always shows when escrow is active — no toggle needed */}
                 <ChecklistPanel
                   orderId={order.id}
                   currentUser={currentUser}
@@ -1957,7 +2103,6 @@ Buyer — you will see live updates as the exporter completes each step.`,
                   checklistRef={checklistRef}
                 />
 
-                {/* FIX 4: Delivery confirm shows after checklist completes (goods_shipped status) */}
                 <DeliveryConfirmPanel
                   order={order}
                   orderId={order.id}
@@ -1994,13 +2139,13 @@ Buyer — you will see live updates as the exporter completes each step.`,
         </BottomSheet>
       )}
 
-      {showPlatformReview && currentUser.role !== "admin" && (
-        <PlatformReviewPrompt
-          userId={currentUser.id}
-          userRole={currentUser.role as "buyer" | "exporter"}
-          onClose={() => { setShowPlatformReview(false); if (currentUser?.role === "buyer") navigate("/"); }}
-        />
-      )}
+         {showPlatformReview && currentUser.role !== "admin" && (
+          <PlatformReviewPrompt
+           userId={currentUser.id}
+           userRole={currentUser.role as "buyer" | "exporter"}
+           onClose={() => { setShowPlatformReview(false); navigate("/dashboard"); }}
+          />
+        )}
     </>
   );
 }

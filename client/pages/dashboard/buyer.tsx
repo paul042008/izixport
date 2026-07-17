@@ -602,7 +602,7 @@ const VerificationLock = ({ message }: { message: string }) => (
 
 // ─── Enhanced Enquiry Modal (with view counter) ───────────────────────────────
 interface EnquiryModalProps {
-  listing: Listing; onConfirm: () => void; onCancel: () => void; loading: boolean
+  listing: Listing; onConfirm: (requestedQuantity: number) => void; onCancel: () => void; loading: boolean
 }
 const EnquiryModal = ({ listing, onConfirm, onCancel, loading }: EnquiryModalProps) => {
   const meta = getCategoryMeta(listing.category, listing.title)
@@ -610,6 +610,27 @@ const EnquiryModal = ({ listing, onConfirm, onCancel, loading }: EnquiryModalPro
   const hasRecordedView = useRef(false)
   const [activeImage, setActiveImage] = useState(0)
   const images = listing.photos || []
+
+  // ── Quantity negotiation ──
+  const [requestedQuantity, setRequestedQuantity] = useState<number>(listing.min_order_quantity)
+  const [quantityError, setQuantityError] = useState('')
+
+  const validateQuantity = (qty: number): string => {
+    if (isNaN(qty) || qty <= 0) return 'Please enter a valid quantity.'
+    if (qty < listing.min_order_quantity)
+      return `Minimum order quantity is ${listing.min_order_quantity.toLocaleString()} ${listing.unit}.`
+    if (qty > listing.available_quantity)
+      return `Only ${listing.available_quantity.toLocaleString()} ${listing.unit} available.`
+    return ''
+  }
+
+  const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const qty = e.target.valueAsNumber
+    setRequestedQuantity(qty)
+    setQuantityError(validateQuantity(qty))
+  }
+
+  const subtotal = (isNaN(requestedQuantity) ? 0 : requestedQuantity) * listing.price_per_unit
 
   useEffect(() => {
     if (!listing?.id || hasRecordedView.current) return
@@ -718,6 +739,68 @@ const EnquiryModal = ({ listing, onConfirm, onCancel, loading }: EnquiryModalPro
               ))}
             </div>
 
+            {/* Quantity Request - Prominent Section */}
+            <div style={{ 
+              marginBottom: 24, 
+              background: '#F9FAFB', 
+              padding: '20px', 
+              borderRadius: 16,
+              border: '1px solid #E5E7EB'
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 12, textAlign: 'center' }}>
+                Request Quantity
+              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 8 }}>
+                <input
+                  type="number"
+                  value={isNaN(requestedQuantity) ? '' : requestedQuantity}
+                  onChange={handleQuantityChange}
+                  min={listing.min_order_quantity}
+                  max={listing.available_quantity}
+                  step="any"
+                  style={{
+                    width: '160px',
+                    padding: '14px 16px',
+                    fontSize: 22,
+                    fontWeight: 700,
+                    textAlign: 'center',
+                    color: '#111827',
+                    fontFamily: 'Plus Jakarta Sans, sans-serif',
+                    background: 'white',
+                    outline: 'none',
+                    border: `2px solid ${quantityError ? '#EF4444' : '#D1D5DB'}`,
+                    borderRadius: 12,
+                  }}
+                />
+                <span style={{ fontSize: 18, fontWeight: 600, color: '#6B7280' }}>{listing.unit}</span>
+              </div>
+              <p style={{ textAlign: 'center', fontSize: 13, color: '#6B7280', marginTop: 4 }}>
+                Min: {listing.min_order_quantity.toLocaleString()} {listing.unit} &nbsp;·&nbsp; Available: {listing.available_quantity.toLocaleString()} {listing.unit}
+              </p>
+              {quantityError && (
+                <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#DC2626', marginTop: 8 }}>{quantityError}</p>
+              )}
+            </div>
+
+            {/* Live Subtotal */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#F0FDF4',
+              border: '1px solid #BBF7D0',
+              borderRadius: 12,
+              padding: '14px 20px',
+              marginBottom: 24,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Estimated Goods Value
+              </span>
+              <span style={{ fontSize: 24, fontWeight: 800, color: '#166534' }}>
+                ${subtotal.toLocaleString()}
+              </span>
+            </div>
+
             {/* Description */}
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 8 }}>Description</h3>
@@ -752,7 +835,7 @@ const EnquiryModal = ({ listing, onConfirm, onCancel, loading }: EnquiryModalPro
              </div>
           </div>
 
-          <button className="bbtn-primary" onClick={onConfirm} disabled={loading} style={{ width: '100%' }}>
+          <button className="bbtn-primary" onClick={() => onConfirm(requestedQuantity)} disabled={loading || !!quantityError} style={{ width: '100%' }}>
             {loading ? <><Loader2 size={18} className="bspin" /> Processing...</> : 'Open Deal Room'}
           </button>
         </div>
@@ -978,8 +1061,8 @@ const HomeTab = React.memo(({
                     borderRadius: 16,
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    transition: 'transform 0.18s, box-shadow 0.18s',
-                  }}
+                    transition: 'transform 0.18s, boxShadow 0.18s',
+                    }}
                   onMouseEnter={e => {
                     e.currentTarget.style.transform = 'translateY(-2px)'
                     e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.08)'
@@ -1813,26 +1896,57 @@ export default function BuyerDashboard() {
     setEnquiryTarget(listing)
   }, [isVerified])
 
-  const handleConfirmEnquiry = useCallback(async () => {
+  const handleConfirmEnquiry = useCallback(async (requestedQuantity: number) => {
     if (!enquiryTarget || !profile) return
+    if (isNaN(requestedQuantity) ||
+        requestedQuantity < enquiryTarget.min_order_quantity ||
+        requestedQuantity > enquiryTarget.available_quantity) {
+      toast.error('Please enter a valid quantity before confirming.')
+      return
+    }
     setEnquiryLoading(true)
     try {
+      const subtotal = requestedQuantity * enquiryTarget.price_per_unit
       const { data: order, error: orderErr } = await supabase
         .from('orders').insert({
           buyer_id: profile.id,
           exporter_id: enquiryTarget.exporter_id,
           listing_id: enquiryTarget.id,
           order_status: 'enquiring', escrow_status: 'pending',
-          total_amount: enquiryTarget.price_per_unit * enquiryTarget.min_order_quantity,
-          currency: 'USD', quantity: enquiryTarget.min_order_quantity,
+          requested_quantity: requestedQuantity,
+          quantity: requestedQuantity,
+          unit_price: enquiryTarget.price_per_unit,
+          subtotal: subtotal,
+          total_amount: subtotal,
+          quantity_unit: enquiryTarget.unit,   // use the listing's unit
+          currency: 'USD',
+          quantity_locked: false,
         }).select().single()
       if (orderErr) throw orderErr
+
+      // ─── INSERT SYSTEM MESSAGE ────────────────────────────────────────
+      await supabase.from('messages').insert({
+        order_id: order.id,
+        sender_type: 'system',
+        is_ai: true,
+        content: `Buyer requested:
+
+${requestedQuantity} ${enquiryTarget.unit}
+
+Unit Price:
+${formatMoney(enquiryTarget.price_per_unit, 'USD')}
+
+Estimated Goods Value:
+${formatMoney(subtotal, 'USD')}
+
+Waiting for exporter response.`,
+      })
 
       await supabase.from('notifications').insert({
         user_id: enquiryTarget.exporter_id,
         title: 'New Enquiry Received',
         message: `${profile?.company_name || profile?.full_name || 'A buyer'} is interested in ${enquiryTarget.title}. Open your Trade Room to respond.`,
-        type: 'order',
+        type: 'deal',
         read: false,
         link: `/deal/${order.id}`,
       })
@@ -1972,18 +2086,18 @@ export default function BuyerDashboard() {
             </div>
 
             <button
-    onClick={handleSignOut}
-    style={{
-      width: 36, height: 36, borderRadius: 10,
-      background: '#F9FAFB', border: '1px solid #E5E7EB',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      cursor: 'pointer',
-      color: '#4B5563',
-    }}
-    title="Sign out"
-  >
-    <LogOut size={16} />
-  </button>
+              onClick={handleSignOut}
+              style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: '#F9FAFB', border: '1px solid #E5E7EB',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#4B5563',
+              }}
+              title="Sign out"
+            >
+              <LogOut size={16} />
+            </button>
 
           </div>
         </div>
