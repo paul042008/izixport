@@ -38,14 +38,15 @@ interface Bank {
   name: string;
 }
 
-const STATIC_BANKS: Bank[] = [
+// Replace the STATIC_BANKS block with this fallback list only.
+const FALLBACK_BANKS: Bank[] = [
   { id: 1, code: '044', name: 'Access Bank' },
-  { id: 2, code: '058', name: 'GTBank' },
-  { id: 3, code: '011', name: 'First Bank' },
+  { id: 2, code: '058', name: 'Guaranty Trust Bank' },
+  { id: 3, code: '011', name: 'First Bank of Nigeria' },
   { id: 4, code: '221', name: 'Stanbic IBTC Bank' },
   { id: 5, code: '068', name: 'Standard Chartered Bank' },
-  { id: 6, code: '032', name: 'Union Bank' },
-  { id: 7, code: '033', name: 'United Bank for Africa (UBA)' },
+  { id: 6, code: '032', name: 'Union Bank of Nigeria' },
+  { id: 7, code: '033', name: 'United Bank For Africa' },
   { id: 8, code: '215', name: 'Unity Bank' },
   { id: 9, code: '035', name: 'Wema Bank' },
   { id: 10, code: '057', name: 'Zenith Bank' },
@@ -57,13 +58,14 @@ const STATIC_BANKS: Bank[] = [
   { id: 16, code: '301', name: 'Jaiz Bank' },
   { id: 17, code: '050', name: 'Ecobank Nigeria' },
   { id: 18, code: '084', name: 'Enterprise Bank' },
-  { id: 19, code: '214', name: 'First City Monument Bank (FCMB)' },
-  { id: 20, code: '304', name: 'Polaris Bank' },
+  { id: 19, code: '214', name: 'First City Monument Bank' },
+  { id: 20, code: '076', name: 'Polaris Bank' },
   { id: 21, code: '103', name: 'Titan Trust Bank' },
-  { id: 22, code: '50211', name: 'Opay' },
-  { id: 23, code: '50204', name: 'Moniepoint' },
-  { id: 24, code: '400001', name: 'Palmpay' },
+  { id: 22, code: '999992', name: 'OPay Digital Services Limited (OPay)' },
+  { id: 23, code: '50515', name: 'Moniepoint MFB' },
+  { id: 24, code: '999991', name: 'PalmPay' },
 ].sort((a, b) => a.name.localeCompare(b.name));
+
 
 interface ReadinessItem {
   key: 'has_nepc_cert' | 'has_product_testing' | 'has_freight_forwarder' | 'has_shipped_before';
@@ -122,15 +124,17 @@ export default function ExporterStep2() {
   const [submitting, setSubmitting] = useState(false);
 
   // Bank details
-  const [banks] = useState<Bank[]>(STATIC_BANKS);
-  const [bankCode, setBankCode] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [accountName, setAccountName] = useState('');
-  const [bankVerified, setBankVerified] = useState(false);
-  const [bankLoading, setBankLoading] = useState(false);
-  const [bankError, setBankError] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+// Replace the current bank state block with this.
+const [banks, setBanks] = useState<Bank[]>([]);
+const [banksLoading, setBanksLoading] = useState(true);
+const [bankCode, setBankCode] = useState('');
+const [accountNumber, setAccountNumber] = useState('');
+const [accountName, setAccountName] = useState('');
+const [bankVerified, setBankVerified] = useState(false);
+const [bankLoading, setBankLoading] = useState(false);
+const [bankError, setBankError] = useState('');
+const [dropdownOpen, setDropdownOpen] = useState(false);
+const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Export readiness
   const [readinessExpanded, setReadinessExpanded] = useState(false);
@@ -157,6 +161,50 @@ export default function ExporterStep2() {
       if (nepcPreview) URL.revokeObjectURL(nepcPreview);
     };
   }, [cacPreview, nepcPreview]);
+
+  // Add this effect near your other useEffect hooks.
+useEffect(() => {
+  let mounted = true;
+
+  const loadBanks = async () => {
+    setBanksLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('get-bank', {
+        body: { country: 'nigeria' },
+      });
+
+      if (error) throw error;
+
+      const bankList = Array.isArray(data) ? data : [];
+      const cleaned = bankList
+        .map((b: any) => ({
+          id: Number(b.id),
+          code: String(b.code || '').trim(),
+          name: String(b.name || '').trim(),
+        }))
+        .filter((b: Bank) => b.code && b.name)
+        .sort((a: Bank, b: Bank) => a.name.localeCompare(b.name));
+
+      if (mounted && cleaned.length > 0) {
+        setBanks(cleaned);
+      } else if (mounted) {
+        setBanks(FALLBACK_BANKS);
+      }
+    } catch (err) {
+      console.error('Failed to load Paystack banks:', err);
+      if (mounted) setBanks(FALLBACK_BANKS);
+    } finally {
+      if (mounted) setBanksLoading(false);
+    }
+  };
+
+    loadBanks();
+
+     return () => {
+        mounted = false;
+     };
+
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
