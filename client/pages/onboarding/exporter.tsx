@@ -281,32 +281,37 @@ useEffect(() => {
     }
   }, [cacPreview, nepcPreview]);
 
-  const handleBankVerify = async () => {
-    if (!bankCode || !accountNumber) {
-      toast.error('Select a bank and enter an account number.');
-      return;
+// Replace handleBankVerify with this.
+const handleBankVerify = async () => {
+  if (!bankCode || !accountNumber) {
+    toast.error('Select a bank and enter an account number.');
+    return;
+  }
+
+  setBankLoading(true);
+  setBankError('');
+
+  try {
+    const { data, error } = await supabase.functions.invoke('resolve-bank-account', {
+      body: { bank_code: bankCode, account_number: accountNumber },
+    });
+
+    if (error) throw error;
+
+    if (data?.account_name) {
+      setAccountName(data.account_name); // save exactly what Paystack returns
+      setBankVerified(true);
+      toast.success('Account verified!');
+    } else {
+      throw new Error('Could not resolve account name.');
     }
-    setBankLoading(true);
-    setBankError('');
-    try {
-      const { data, error } = await supabase.functions.invoke('resolve-bank-account', {
-        body: { bank_code: bankCode, account_number: accountNumber },
-      });
-      if (error) throw error;
-      if (data.account_name) {
-        setAccountName(data.account_name);
-        setBankVerified(true);
-        toast.success('Account verified!');
-      } else {
-        throw new Error('Could not resolve account name.');
-      }
-    } catch (err: any) {
-      setBankError(err.message || 'Verification failed.');
-      setBankVerified(false);
-    } finally {
-      setBankLoading(false);
-    }
-  };
+  } catch (err: any) {
+    setBankError(err.message || 'Verification failed.');
+    setBankVerified(false);
+  } finally {
+    setBankLoading(false);
+  }
+};
 
   const uploadFile = async (file: File, userId: string, prefix: string) => {
     const ext = file.name.split('.').pop();
@@ -356,19 +361,27 @@ useEffect(() => {
       if (verError) throw verError;
 
       // Save bank account
-      const selectedBankName = banks.find((b) => b.code === bankCode)?.name || '';
-      const { error: bankErr } = await supabase.from('user_bank_accounts').upsert(
-        {
-          user_id: userId,
-          bank_code: bankCode,
-          bank_name: selectedBankName,
-          account_number: accountNumber,
-          account_name: accountName,
-          is_verified: true,
-        },
-        { onConflict: 'user_id' }
-      );
-      if (bankErr) throw bankErr;
+      // Replace the bank save part inside handleSubmit with this.
+const selectedBankName =
+banks.find((b) => b.code === bankCode)?.name || '';
+
+if (!selectedBankName) {
+throw new Error('Please re-select your bank from the live bank list.');
+}
+
+const { error: bankErr } = await supabase.from('user_bank_accounts').upsert(
+{
+  user_id: userId,
+  bank_code: bankCode,
+  bank_name: selectedBankName,
+  account_number: accountNumber,
+  account_name: accountName,
+  is_verified: true,
+},
+{ onConflict: 'user_id' }
+);
+
+if (bankErr) throw bankErr;
 
       // Update user profile
       const { error: userUpdateError } = await supabase.from('users').update({
@@ -688,7 +701,10 @@ useEffect(() => {
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
                 style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
               >
-                <span className={selectedBankName ? '' : 'text-gray-400'}>{selectedBankName || 'Select your bank'}</span>
+                // Replace the button label / dropdown area with a loading-aware version.
+<span className={selectedBankName ? '' : 'text-gray-400'}>
+  {selectedBankName || (banksLoading ? 'Loading banks...' : 'Select your bank')}
+</span>
                 <ChevronDown size={16} className="text-gray-400" />
               </button>
               {dropdownOpen && (
