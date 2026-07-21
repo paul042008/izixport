@@ -369,7 +369,7 @@ if (!selectedBankName) {
 throw new Error('Please re-select your bank from the live bank list.');
 }
 
-const { error: bankErr } = await supabase.from('user_bank_accounts').upsert(
+const { error: bankErr } = await supabase    .upsert(
 {
   user_id: userId,
   bank_code: bankCode,
