@@ -511,23 +511,23 @@ function HeroSection() {
             </div>
 
             <h1
-              style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontSize: "clamp(48px, 8vw, 104px)",
-                fontWeight: 900,
-                lineHeight: 0.95,
-                letterSpacing: "-0.04em",
-                color: C.white,
-                margin: "0 0 24px",
-                maxWidth: 900,
-              }}
-            >
-              Nigerian goods.
-              <span style={{ display: "block" }}>Global buyers.</span>
-              <span style={{ display: "block", color: C.gold }}>
-                Exported with trust.
-              </span>
-            </h1>
+  style={{
+    fontFamily: "'Barlow Condensed', sans-serif",
+    fontSize: "clamp(48px, 8vw, 104px)",
+    fontWeight: 900,
+    lineHeight: 1.05,
+    letterSpacing: "-0.02em",
+    color: C.white,
+    margin: "0 0 24px",
+    maxWidth: 900,
+  }}
+>
+  Nigerian goods.
+  <span style={{ display: "block", marginTop: 4 }}>Global buyers.</span>
+  <span style={{ display: "block", marginTop: 4, color: C.gold }}>
+    Exported with trust.
+  </span>
+</h1>
 
             <p
               style={{
