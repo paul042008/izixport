@@ -124,17 +124,16 @@ export default function ExporterStep2() {
   const [submitting, setSubmitting] = useState(false);
 
   // Bank details
-// Replace the current bank state block with this.
-const [banks, setBanks] = useState<Bank[]>([]);
-const [banksLoading, setBanksLoading] = useState(true);
-const [bankCode, setBankCode] = useState('');
-const [accountNumber, setAccountNumber] = useState('');
-const [accountName, setAccountName] = useState('');
-const [bankVerified, setBankVerified] = useState(false);
-const [bankLoading, setBankLoading] = useState(false);
-const [bankError, setBankError] = useState('');
-const [dropdownOpen, setDropdownOpen] = useState(false);
-const dropdownRef = useRef<HTMLDivElement>(null);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [banksLoading, setBanksLoading] = useState(true);
+  const [bankCode, setBankCode] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [bankVerified, setBankVerified] = useState(false);
+  const [bankLoading, setBankLoading] = useState(false);
+  const [bankError, setBankError] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Export readiness
   const [readinessExpanded, setReadinessExpanded] = useState(false);
@@ -162,48 +161,46 @@ const dropdownRef = useRef<HTMLDivElement>(null);
     };
   }, [cacPreview, nepcPreview]);
 
-  // Add this effect near your other useEffect hooks.
-useEffect(() => {
-  let mounted = true;
+  useEffect(() => {
+    let mounted = true;
 
-  const loadBanks = async () => {
-    setBanksLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('get-bank', {
-        body: { country: 'nigeria' },
-      });
+    const loadBanks = async () => {
+      setBanksLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('get-bank', {
+          body: { country: 'nigeria' },
+        });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      const bankList = Array.isArray(data) ? data : [];
-      const cleaned = bankList
-        .map((b: any) => ({
-          id: Number(b.id),
-          code: String(b.code || '').trim(),
-          name: String(b.name || '').trim(),
-        }))
-        .filter((b: Bank) => b.code && b.name)
-        .sort((a: Bank, b: Bank) => a.name.localeCompare(b.name));
+        const bankList = Array.isArray(data) ? data : [];
+        const cleaned = bankList
+          .map((b: any) => ({
+            id: Number(b.id),
+            code: String(b.code || '').trim(),
+            name: String(b.name || '').trim(),
+          }))
+          .filter((b: Bank) => b.code && b.name)
+          .sort((a: Bank, b: Bank) => a.name.localeCompare(b.name));
 
-      if (mounted && cleaned.length > 0) {
-        setBanks(cleaned);
-      } else if (mounted) {
-        setBanks(FALLBACK_BANKS);
+        if (mounted && cleaned.length > 0) {
+          setBanks(cleaned);
+        } else if (mounted) {
+          setBanks(FALLBACK_BANKS);
+        }
+      } catch (err) {
+        console.error('Failed to load Paystack banks:', err);
+        if (mounted) setBanks(FALLBACK_BANKS);
+      } finally {
+        if (mounted) setBanksLoading(false);
       }
-    } catch (err) {
-      console.error('Failed to load Paystack banks:', err);
-      if (mounted) setBanks(FALLBACK_BANKS);
-    } finally {
-      if (mounted) setBanksLoading(false);
-    }
-  };
+    };
 
     loadBanks();
 
-     return () => {
-        mounted = false;
-     };
-
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Close dropdown on outside click
@@ -281,37 +278,36 @@ useEffect(() => {
     }
   }, [cacPreview, nepcPreview]);
 
-// Replace handleBankVerify with this.
-const handleBankVerify = async () => {
-  if (!bankCode || !accountNumber) {
-    toast.error('Select a bank and enter an account number.');
-    return;
-  }
-
-  setBankLoading(true);
-  setBankError('');
-
-  try {
-    const { data, error } = await supabase.functions.invoke('resolve-bank-account', {
-      body: { bank_code: bankCode, account_number: accountNumber },
-    });
-
-    if (error) throw error;
-
-    if (data?.account_name) {
-      setAccountName(data.account_name); // save exactly what Paystack returns
-      setBankVerified(true);
-      toast.success('Account verified!');
-    } else {
-      throw new Error('Could not resolve account name.');
+  const handleBankVerify = async () => {
+    if (!bankCode || !accountNumber) {
+      toast.error('Select a bank and enter an account number.');
+      return;
     }
-  } catch (err: any) {
-    setBankError(err.message || 'Verification failed.');
-    setBankVerified(false);
-  } finally {
-    setBankLoading(false);
-  }
-};
+
+    setBankLoading(true);
+    setBankError('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('resolve-bank-account', {
+        body: { bank_code: bankCode, account_number: accountNumber },
+      });
+
+      if (error) throw error;
+
+      if (data?.account_name) {
+        setAccountName(data.account_name); // save exactly what Paystack returns
+        setBankVerified(true);
+        toast.success('Account verified!');
+      } else {
+        throw new Error('Could not resolve account name.');
+      }
+    } catch (err: any) {
+      setBankError(err.message || 'Verification failed.');
+      setBankVerified(false);
+    } finally {
+      setBankLoading(false);
+    }
+  };
 
   const uploadFile = async (file: File, userId: string, prefix: string) => {
     const ext = file.name.split('.').pop();
@@ -361,27 +357,29 @@ const handleBankVerify = async () => {
       if (verError) throw verError;
 
       // Save bank account
-      // Replace the bank save part inside handleSubmit with this.
-const selectedBankName =
-banks.find((b) => b.code === bankCode)?.name || '';
+      const selectedBankName =
+        banks.find((b) => b.code === bankCode)?.name || '';
 
-if (!selectedBankName) {
-throw new Error('Please re-select your bank from the live bank list.');
-}
+      if (!selectedBankName) {
+        throw new Error('Please re-select your bank from the live bank list.');
+      }
 
-const { error: bankErr } = await supabase    .upsert(
-{
-  user_id: userId,
-  bank_code: bankCode,
-  bank_name: selectedBankName,
-  account_number: accountNumber,
-  account_name: accountName,
-  is_verified: true,
-},
-{ onConflict: 'user_id' }
-);
+      // ─── FIXED: Use .from('user_bank_accounts').upsert() ───
+      const { error: bankErr } = await supabase
+        .from('user_bank_accounts')
+        .upsert(
+          {
+            user_id: userId,
+            bank_code: bankCode,
+            bank_name: selectedBankName,
+            account_number: accountNumber,
+            account_name: accountName,
+            is_verified: true,
+          },
+          { onConflict: 'user_id' }
+        );
 
-if (bankErr) throw bankErr;
+      if (bankErr) throw bankErr;
 
       // Update user profile
       const { error: userUpdateError } = await supabase.from('users').update({
@@ -701,10 +699,9 @@ if (bankErr) throw bankErr;
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-[#006B3F] focus:ring-2 focus:ring-[#006B3F]/20 outline-none text-sm flex items-center justify-between bg-white"
                 style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
               >
-                // Replace the button label / dropdown area with a loading-aware version.
-<span className={selectedBankName ? '' : 'text-gray-400'}>
-  {selectedBankName || (banksLoading ? 'Loading banks...' : 'Select your bank')}
-</span>
+                <span className={selectedBankName ? '' : 'text-gray-400'}>
+                  {selectedBankName || (banksLoading ? 'Loading banks...' : 'Select your bank')}
+                </span>
                 <ChevronDown size={16} className="text-gray-400" />
               </button>
               {dropdownOpen && (
