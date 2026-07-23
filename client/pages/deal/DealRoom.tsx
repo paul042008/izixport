@@ -18,6 +18,19 @@
 // - AI welcome message is automatically seeded with the order's creation time so it appears first.
 // - Buyer request summary message is automatically seeded as a separate message after the welcome.
 // - Translation layer removed. Messages are displayed in the sender's original language.
+//
+// NEW: PandaScrow escrow tools wiring.
+// - Resend OTP: buyer-facing button that calls /pandascrow-escrow/resend-otp for the current order's escrow.
+// - Escrow Listing/Retrieval: read-only "View Escrow History" action (visible to buyer & exporter) that calls
+//   /pandascrow-escrow/escrow?uuid=... and displays the result in a BottomSheet. Also synced once on load.
+// - Dispute: buyer-facing "Raise Dispute (Escrow Provider)" button that calls /pandascrow-escrow/dispute,
+//   then mirrors the disputed state locally and posts a system message. Disabled once completed/disputed.
+//
+// NEW: Admin moderator support.
+// - Admin can enter the DealRoom and view all panels.
+// - Admin messages are sent with sender_type='admin' and rendered with a special bubble.
+// - Admin sees all sections (freight, checklist, payment info) but cannot initiate payment or change status.
+// - Admin can send messages as "🛡 IziXport Support".
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -29,7 +42,7 @@ interface Message {
   id: string;
   order_id: string;
   sender_id: string | null;
-  sender_type: "buyer" | "exporter" | "ai" | "system";
+  sender_type: "buyer" | "exporter" | "ai" | "system" | "admin";
   content: string;
   is_ai: boolean;
   is_blocked?: boolean;
@@ -202,6 +215,12 @@ const LANG_NAMES: Record<string, string> = {
 
 const BUYER_ESCROW_FEE_RATE = 0.045;
 const EXPORTER_PLATFORM_FEE_RATE = 0.03;
+
+// ─── PANDASCROW BROKER UUID ───────────────────────────────────────────────────
+// Used for resend-otp / escrow listing / dispute calls. Falls back to empty
+// string (the edge function is expected to validate/guard against this).
+const PANDASCROW_BROKER_UUID: string =
+  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_PANDASCROW_BROKER_UUID) || "";
 
 // ─── STATUSES THAT MEAN ESCROW IS ACTIVE ─────────────────────────────────────
 // Used to decide when checklist should be visible
@@ -495,6 +514,28 @@ function AIMessage({ msg, showAvatar }: {
         )}
         <div style={{ background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
           <RichMessageText text={msg.content} style={{ color: "#374151", fontSize: 13.5, lineHeight: 1.7 }} />
+        </div>
+        <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── NEW: Admin Message Component ─────────────────────────────────────────────
+function AdminMessage({ msg, showAvatar }: {
+  msg: Message; showAvatar: boolean; key?: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, margin: "3px 0" }}>
+      {showAvatar ? <Avatar label="IZ" type="ai" size={30} /> : <div style={{ width: 30 }} />}
+      <div style={{ maxWidth: "78%", display: "flex", flexDirection: "column", gap: 3 }}>
+        {showAvatar && (
+          <span style={{ color: "#D4A843", fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.06em", textTransform: "uppercase", paddingLeft: 2 }}>
+            🛡 IziXport Support
+          </span>
+        )}
+        <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: "18px 18px 18px 4px", padding: "10px 14px" }}>
+          <RichMessageText text={msg.content} style={{ color: "#92400E", fontSize: 13.5, lineHeight: 1.7 }} />
         </div>
         <span style={{ color: "#9CA3AF", fontSize: 10, paddingLeft: 4 }}>{formatTime(msg.created_at)}</span>
       </div>
@@ -1497,6 +1538,17 @@ export default function DealRoom() {
   const [viewerLang, setViewerLang] = useState("en");
   const paymentSyncRef = useRef(false);
 
+  // ── NEW: PandaScrow escrow tools state (Resend OTP / Escrow Listing / Dispute) ──
+  const [otpSending, setOtpSending] = useState(false);
+  const [showEscrowHistory, setShowEscrowHistory] = useState(false);
+  const [escrowHistoryLoading, setEscrowHistoryLoading] = useState(false);
+  const [escrowHistoryData, setEscrowHistoryData] = useState<any>(null);
+  const [escrowHistoryError, setEscrowHistoryError] = useState<string | null>(null);
+  const escrowSyncRef = useRef(false);
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [disputeSubmitting, setDisputeSubmitting] = useState(false);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -1514,6 +1566,7 @@ export default function DealRoom() {
 
   const isBuyer = order && currentUser ? currentUser.id === order.buyer_id : false;
   const isExporter = order && currentUser ? currentUser.id === order.exporter_id : false;
+  const isAdmin = currentUser?.role === "admin";
 
   const goodsAmount = Number(order?.total_amount || 0);
   const freightAmount = Number(order?.freight_cost || 0);
@@ -1523,6 +1576,141 @@ export default function DealRoom() {
   const exporterFee = dealAmount * EXPORTER_PLATFORM_FEE_RATE;
   const exporterPayout = dealAmount - exporterFee;
   const currency = order?.currency || order?.freight_currency || "USD";
+
+  // ── NEW: shared helper to get the current Supabase access token for edge function calls ──
+  const getAccessToken = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token;
+  }, []);
+
+  // ── NEW: A) Resend OTP ──────────────────────────────────────────────────────
+  const handleResendOtp = useCallback(async () => {
+    if (!order?.pandascrow_escrow_id || !orderId) {
+      toast.error("No active escrow found for this order yet.");
+      return;
+    }
+    setOtpSending(true);
+    try {
+      const accessToken = await getAccessToken();
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pandascrow-escrow/resend-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
+          body: JSON.stringify({
+            uuid: PANDASCROW_BROKER_UUID,
+            escrow_id: order.pandascrow_escrow_id,
+            orderId,
+          }),
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Failed to resend OTP.");
+
+      toast.success("OTP resent successfully.");
+      await supabase.from("messages").insert({
+        order_id: orderId,
+        sender_type: "system",
+        is_ai: true,
+        content: `🔁 A new escrow OTP was resent for this deal. Please check your registered email/phone for the code.`,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to resend OTP.");
+    } finally {
+      setOtpSending(false);
+    }
+  }, [order?.pandascrow_escrow_id, orderId, getAccessToken]);
+
+  // ── NEW: B) Escrow listing / retrieval (read-only) ──────────────────────────
+  const fetchEscrowHistory = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!order?.pandascrow_escrow_id) {
+      if (!silent) toast.error("No escrow found for this order yet.");
+      return;
+    }
+    setEscrowHistoryLoading(true);
+    setEscrowHistoryError(null);
+    try {
+      const accessToken = await getAccessToken();
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pandascrow-escrow/escrow?uuid=${encodeURIComponent(PANDASCROW_BROKER_UUID)}`,
+        {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${accessToken}` },
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Failed to fetch escrow status.");
+      setEscrowHistoryData(result);
+    } catch (err: any) {
+      const message = err?.message || "Failed to fetch escrow status.";
+      setEscrowHistoryError(message);
+      if (!silent) toast.error(message);
+    } finally {
+      setEscrowHistoryLoading(false);
+    }
+  }, [order?.pandascrow_escrow_id, getAccessToken]);
+
+  // Sync escrow status once on load (only when an escrow id exists), guarded against repeat calls.
+  useEffect(() => {
+    if (!order?.pandascrow_escrow_id) return;
+    if (escrowSyncRef.current) return;
+    escrowSyncRef.current = true;
+    fetchEscrowHistory({ silent: true });
+  }, [order?.pandascrow_escrow_id, fetchEscrowHistory]);
+
+  // ── NEW: C) Dispute creation via PandaScrow ─────────────────────────────────
+  const submitPandaScrowDispute = useCallback(async () => {
+    if (!order?.pandascrow_escrow_id || !orderId) {
+      toast.error("No active escrow found for this order yet.");
+      return;
+    }
+    if (!disputeReason.trim()) {
+      toast.error("Please describe the issue before submitting.");
+      return;
+    }
+    setDisputeSubmitting(true);
+    try {
+      const accessToken = await getAccessToken();
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pandascrow-escrow/dispute`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
+          body: JSON.stringify({
+            uuid: PANDASCROW_BROKER_UUID,
+            escrow_id: order.pandascrow_escrow_id,
+            reason: disputeReason.trim(),
+            orderId,
+          }),
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Failed to raise dispute.");
+
+      await supabase.from("orders").update({
+        order_status: "disputed",
+        escrow_status: "frozen",
+        dispute_raised: true,
+      }).eq("id", orderId);
+
+      await supabase.from("messages").insert({
+        order_id: orderId,
+        sender_type: "system",
+        is_ai: true,
+        content: `⚠️ A dispute has been raised with the escrow provider.\nReason: ${disputeReason.trim()}\nEscrow is frozen until the case is reviewed.`,
+      });
+
+      toast.success("Dispute submitted to the escrow provider.");
+      setShowDisputeModal(false);
+      setDisputeReason("");
+      await refetchOrder();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to raise dispute.");
+    } finally {
+      setDisputeSubmitting(false);
+    }
+  }, [order?.pandascrow_escrow_id, orderId, disputeReason, getAccessToken, refetchOrder]);
 
   const syncEscrowFundedState = useCallback(async () => {
     if (!orderId) return;
@@ -1847,14 +2035,16 @@ Waiting for exporter response.`;
     if (scan.blocked) { toast.error(`Please do not send ${scan.reason} here.`); setSending(false); return; }
 
     try {
-      const senderType = isBuyer ? "buyer" : "exporter";
+      // Determine sender type: admin, buyer, or exporter
+      let senderType: "buyer" | "exporter" | "admin" = isAdmin ? "admin" : (isBuyer ? "buyer" : "exporter");
       const { data: inserted, error } = await supabase.from("messages").insert({
         order_id: orderId, sender_id: currentUser.id, sender_type: senderType, content: text, is_ai: false,
       }).select().single();
       if (error) throw error;
       setMessages((prev) => [...prev, inserted as Message]);
-      if (isBuyer && PAYMENT_TRIGGERS.test(text) && paymentReady) await initializePayment();
-      if (shouldAIRespond(text)) {
+      // Only auto-trigger payment for buyers, not admin
+      if (!isAdmin && isBuyer && PAYMENT_TRIGGERS.test(text) && paymentReady) await initializePayment();
+      if (!isAdmin && shouldAIRespond(text)) {
         const reply = aiReplyFor(text);
         setTimeout(async () => {
           await supabase.from("messages").insert({ order_id: orderId, sender_type: "ai", is_ai: true, content: reply });
@@ -1864,7 +2054,7 @@ Waiting for exporter response.`;
     finally { setSending(false); }
   };
 
-  const showPaymentButton = Boolean(isBuyer && order && order.order_status === "freight_approved");
+  const showPaymentButton = Boolean(!isAdmin && isBuyer && order && order.order_status === "freight_approved");
 
   const submitBuyerReview = async () => {
     if (buyerRating === 0) { toast.error("Please select a rating."); return; }
@@ -1922,6 +2112,8 @@ Waiting for exporter response.`;
   });
 
   const escrowIsActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
+  const hasPandaScrowEscrow = Boolean(order.pandascrow_escrow_id);
+  const dealClosedOut = order.order_status === "completed" || order.order_status === "disputed";
 
   return (
     <>
@@ -1997,6 +2189,9 @@ Waiting for exporter response.`;
                     </div>
                   );
                 }
+                if (msg.sender_type === "admin") {
+                  return <AdminMessage key={item.key} msg={msg} showAvatar={item.showAvatar} />;
+                }
                 if (msg.is_ai || msg.sender_type === "system") {
                   return <AIMessage key={item.key} msg={msg} showAvatar={item.showAvatar} />;
                 }
@@ -2009,14 +2204,15 @@ Waiting for exporter response.`;
               })}
               <div ref={messagesEndRef} />
             </div>
-            {order.order_status !== "completed" && order.order_status !== "disputed" && !(order.order_status === "delivered" && isBuyer) && (
+            {/* Allow admin to send messages even if order is completed/disputed */}
+            {(!(order.order_status === "completed" || order.order_status === "disputed") || isAdmin) && (
               <div style={{ flexShrink: 0, borderTop: "1px solid #E5E7EB", background: "#fff", padding: "10px 12px" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} placeholder="Type a message…"
+                  <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} placeholder={isAdmin ? "Type a message as IziXport Support…" : "Type a message…"}
                     style={{ flex: 1, minHeight: 44, maxHeight: 120, padding: "11px 12px", borderRadius: 14, border: "1px solid #D1D5DB", background: "#F9FAFB", resize: "none", outline: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
                   <button onClick={handleSend} disabled={sending || !input.trim()}
-                    style={{ height: 44, padding: "0 16px", borderRadius: 14, border: "none", background: "#D4A843", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
-                    {sending ? <Spinner size={14} color="#fff" /> : "Send"}
+                    style={{ height: 44, padding: "0 16px", borderRadius: 14, border: "none", background: isAdmin ? "#FEF3C7" : "#D4A843", color: isAdmin ? "#92400E" : "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+                    {sending ? <Spinner size={14} color={isAdmin ? "#92400E" : "#fff"} /> : "Send"}
                   </button>
                 </div>
               </div>
@@ -2027,13 +2223,20 @@ Waiting for exporter response.`;
             {/* NEW: Quantity Summary Card */}
             <QuantitySummary order={order} currentUser={currentUser} onUpdate={() => refetchOrder()} />
 
+            {/* Freight Quote Form: only exporter (not admin) can edit */}
             {isExporter && (!order.freight_company || order.order_status === FREIGHT_CHANGE_REQUESTED_STATUS) && (
               <FreightQuoteForm order={order} onSubmitted={() => refetchOrder()} />
             )}
+
+            {/* Freight Approval: only for buyer (admin sees read-only via FreightSummary) */}
             {order.order_status === "freight_quoted" && isBuyer && <FreightApprovalCard order={order} orderId={order.id} currentUser={currentUser} />}
-            {["freight_approved","escrow_funded","docs_in_progress","goods_shipped","in_transit","arrived","delivered"].includes(order.order_status) && (
+
+            {/* Freight Summary: show to buyer, exporter, and admin */}
+            {(isBuyer || isExporter || isAdmin) && ["freight_approved","escrow_funded","docs_in_progress","goods_shipped","in_transit","arrived","delivered"].includes(order.order_status) && (
               <FreightSummary order={order} isBuyer={Boolean(isBuyer)} />
             )}
+
+            {/* Payment Button: only buyer (not admin) */}
             {showPaymentButton && (
               <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #E5E7EB", padding: 16, boxSizing: "border-box", width: "100%" }}>
                 <div style={{ fontWeight: 800, fontSize: 14, color: "#111827", fontFamily: "'Barlow Condensed',sans-serif", marginBottom: 12 }}>💳 Secure Escrow Payment</div>
@@ -2057,7 +2260,8 @@ Waiting for exporter response.`;
               </div>
             )}
 
-            {escrowIsActive && (
+            {/* Escrow active panels: show to buyer, exporter, and admin */}
+            {escrowIsActive && (isBuyer || isExporter || isAdmin) && (
               <>
                 {isExporter && (
                   <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #E5E7EB", padding: 16, boxSizing: "border-box", width: "100%" }}>
@@ -2095,6 +2299,7 @@ Waiting for exporter response.`;
                   </div>
                 )}
 
+                {/* Checklist: show to everyone, but only exporter can edit */}
                 <ChecklistPanel
                   orderId={order.id}
                   currentUser={currentUser}
@@ -2103,6 +2308,7 @@ Waiting for exporter response.`;
                   checklistRef={checklistRef}
                 />
 
+                {/* Delivery Confirm: only buyer (admin sees nothing here, but admin can see status elsewhere) */}
                 <DeliveryConfirmPanel
                   order={order}
                   orderId={order.id}
@@ -2111,6 +2317,51 @@ Waiting for exporter response.`;
                   onShowPlatformReview={() => setShowPlatformReview(true)}
                 />
               </>
+            )}
+
+            {/* ── NEW: PandaScrow Escrow Tools (Resend OTP / Escrow History / Dispute) ── */}
+            {hasPandaScrowEscrow && (isBuyer || isExporter || isAdmin) && (
+              <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, padding: 16, boxSizing: "border-box", width: "100%" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: "0.05em", textTransform: "uppercase", color: "#111827" }}>
+                    🔐 Escrow Tools
+                  </span>
+                  <span style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 700 }}>PandaScrow</span>
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {/* Read-only: visible to both buyer and exporter, also admin */}
+                  <button
+                    onClick={() => { setShowEscrowHistory(true); fetchEscrowHistory(); }}
+                    disabled={escrowHistoryLoading}
+                    style={{ width: "100%", padding: "11px", borderRadius: 12, background: "transparent", border: "1.5px solid #D1D5DB", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  >
+                    {escrowHistoryLoading ? <Spinner size={14} color="#374151" /> : "🔄 View Escrow Status / History"}
+                  </button>
+
+                  {/* Buyer-only: resend OTP (relevant while escrow is active, e.g. ahead of release) */}
+                  {isBuyer && escrowIsActive && (
+                    <button
+                      onClick={handleResendOtp}
+                      disabled={otpSending}
+                      style={{ width: "100%", padding: "11px", borderRadius: 12, background: "none", border: "1.5px solid #D4A843", color: "#D4A843", fontWeight: 800, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      {otpSending ? <Spinner size={14} color="#D4A843" /> : "📩 Resend OTP"}
+                    </button>
+                  )}
+
+                  {/* Buyer-only: raise a dispute directly with the escrow provider */}
+                  {isBuyer && (
+                    <button
+                      onClick={() => setShowDisputeModal(true)}
+                      disabled={dealClosedOut}
+                      style={{ width: "100%", padding: "11px", borderRadius: 12, background: "transparent", border: "1.5px solid #FECACA", color: dealClosedOut ? "#F3B4B4" : "#DC2626", fontWeight: 800, fontSize: 13, cursor: dealClosedOut ? "not-allowed" : "pointer" }}
+                    >
+                      ⚠️ Raise Dispute (Escrow Provider)
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -2138,6 +2389,61 @@ Waiting for exporter response.`;
           </div>
         </BottomSheet>
       )}
+
+      {/* ── NEW: Escrow History / Status BottomSheet (read-only) ── */}
+      <BottomSheet open={showEscrowHistory} onClose={() => setShowEscrowHistory(false)} title="Escrow Status">
+        {escrowHistoryLoading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+            <Spinner size={24} color="#006B3F" />
+          </div>
+        ) : escrowHistoryError ? (
+          <div style={{ color: "#DC2626", fontSize: 13, lineHeight: 1.6 }}>{escrowHistoryError}</div>
+        ) : escrowHistoryData ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ color: "#6B7280", fontSize: 11, lineHeight: 1.5 }}>
+              Live status pulled from the escrow provider. This view is read-only.
+            </div>
+            <pre style={{
+              whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11, lineHeight: 1.6,
+              background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, padding: 12,
+              margin: 0, color: "#111827", fontFamily: "'DM Sans',sans-serif",
+            }}>
+              {JSON.stringify(escrowHistoryData, null, 2)}
+            </pre>
+          </div>
+        ) : (
+          <div style={{ color: "#6B7280", fontSize: 13, lineHeight: 1.6 }}>No escrow data available yet.</div>
+        )}
+        <button
+          onClick={() => fetchEscrowHistory()}
+          disabled={escrowHistoryLoading}
+          style={{ width: "100%", marginTop: 14, padding: "12px", borderRadius: 12, background: "#F3F4F6", border: "none", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+        >
+          {escrowHistoryLoading ? <Spinner size={14} color="#374151" /> : "Refresh"}
+        </button>
+      </BottomSheet>
+
+      {/* ── NEW: Raise Dispute (Escrow Provider) BottomSheet ── */}
+      <BottomSheet open={showDisputeModal} onClose={() => setShowDisputeModal(false)} title="Raise Dispute (Escrow Provider)">
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ color: "#374151", fontSize: 13, lineHeight: 1.7 }}>
+            Describe the issue. This will be sent directly to the escrow provider and will freeze the deal until reviewed.
+          </div>
+          <textarea
+            value={disputeReason}
+            onChange={(e) => setDisputeReason(e.target.value)}
+            rows={4}
+            placeholder="Describe what went wrong..."
+            style={{ width: "100%", padding: "11px 12px", border: "1px solid #D1D5DB", borderRadius: 10, background: "#F9FAFB", resize: "none", fontSize: 13, fontFamily: "'DM Sans',sans-serif", boxSizing: "border-box" }}
+          />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => setShowDisputeModal(false)} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#F3F4F6", border: "none", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+            <button onClick={submitPandaScrowDispute} disabled={disputeSubmitting} style={{ flex: 1, padding: "12px", borderRadius: 12, background: "#DC2626", border: "none", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              {disputeSubmitting ? <Spinner size={14} color="#fff" /> : "Submit Dispute"}
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
 
          {showPlatformReview && currentUser.role !== "admin" && (
           <PlatformReviewPrompt
