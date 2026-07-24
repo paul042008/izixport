@@ -1798,37 +1798,58 @@ function DealsPage() {
 
   // ── Admin chat sender (now uses sender_type='admin') ──────────────────────
   const sendMessage = async () => {
-    if (!chatInput.trim() || !selectedOrder) return;
+    if (!chatInput.trim() || !selectedOrder || sending) return;
+  
     const content = chatInput.trim();
     setChatInput('');
     setSending(true);
-
+  
+    const session = (await supabase.auth.getSession()).data.session;
+    const adminId = session?.user?.id;
+    if (!adminId) {
+      toast.error('You are not signed in');
+      setSending(false);
+      return;
+    }
+  
     const tempId = 'temp-' + Date.now();
     const newMsg = {
       id: tempId,
       order_id: selectedOrder.id,
       sender_type: 'admin',
-      sender_id: null,
+      sender_id: adminId,
       content,
       is_ai: false,
+      is_system: false,
       created_at: new Date().toISOString(),
     };
+  
     setMessages(prev => [...prev, newMsg]);
-
+  
     try {
       const { error } = await supabase
         .from('messages')
         .insert({
           order_id: selectedOrder.id,
           sender_type: 'admin',
-          sender_id: null,
+          sender_id: adminId,
           content,
           is_ai: false,
+          is_system: false,
         });
+  
       if (error) throw error;
+  
       toast.success('Message sent');
-      const adminId = (await supabase.auth.getSession()).data.session?.user?.id || '';
-      await logAuditEvent({ adminId, action: 'admin_sent_message', targetType: 'order', targetId: selectedOrder.id, details: content.slice(0, 100) });
+  
+      await logAuditEvent({
+        adminId,
+        action: 'admin_sent_message',
+        targetType: 'order',
+        targetId: selectedOrder.id,
+        details: content.slice(0, 100),
+      });
+  
       await fetchMessages(selectedOrder.id);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send message');
