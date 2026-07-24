@@ -1819,12 +1819,26 @@ export default function DealRoom() {
       }).eq("id", orderId);
 
       // NEW: ensure a row exists in `disputes` so evidence upload / admin resolution can attach to it.
-      const { error: disputeUpsertError } = await supabase.from("disputes").upsert(
-        { order_id: orderId, status: "open", reason: disputeReason.trim(), raised_by: currentUser?.id ?? null },
-        { onConflict: "order_id", ignoreDuplicates: false }
-      );
-      if (disputeUpsertError) console.error("Failed to create dispute record:", disputeUpsertError);
-
+      if (!currentUser?.id) {
+        throw new Error("You must be signed in to raise a dispute");
+      }
+      
+      const { error: disputeUpsertError } = await supabase
+        .from("disputes")
+        .upsert(
+          {
+            order_id: orderId,
+            status: "open",
+            reason: disputeReason.trim(),
+            raised_by: currentUser.id,
+          },
+          { onConflict: "order_id", ignoreDuplicates: false }
+        );
+      
+      if (disputeUpsertError) {
+        console.error("Failed to create dispute record:", disputeUpsertError);
+      }
+      
       await supabase.from("messages").insert({
         order_id: orderId,
         sender_type: "system",
