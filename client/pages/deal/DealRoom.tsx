@@ -1558,37 +1558,58 @@ function DisputeEvidencePanel({ orderId, role, canUpload, disputeData, onEvidenc
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+  
     setUploading(true);
+  
     try {
       const uploadedUrls: string[] = [];
+  
       for (const file of files) {
         const path = `disputes/${orderId}/${role}/${Date.now()}_${file.name}`;
-        // Use 'dispute-evidence' bucket; fallback to 'listings' if needed
-        let bucket = 'dispute-evidence';
-        // Check if bucket exists, else fallback to 'listings'
+  
+        let bucket = "dispute-evidence";
         const { data: buckets } = await supabase.storage.listBuckets();
-        const bucketExists = buckets?.some(b => b.name === bucket);
-        if (!bucketExists) bucket = 'listings';
-        const { data, error } = await supabase.storage.from(bucket).upload(path, file, { cacheControl: '3600' });
+        const bucketExists = buckets?.some((b) => b.name === bucket);
+        if (!bucketExists) bucket = "listings";
+  
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .upload(path, file, { cacheControl: "3600", upsert: false });
+  
         if (error) throw error;
+  
         const publicUrl = supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
         uploadedUrls.push(publicUrl);
       }
-      // Append to existing — never overwrite previous uploads.
-      const newUrls = [...evidenceUrls, ...uploadedUrls];
-      // Upsert in case the dispute row doesn't exist yet for some reason (defensive; should already exist).
+  
+      const { data: disputeRow, error: fetchError } = await supabase
+        .from("disputes")
+        .select("buyer_evidence_urls, exporter_evidence_urls")
+        .eq("order_id", orderId)
+        .single();
+  
+      if (fetchError || !disputeRow) {
+        throw new Error("Dispute record not found. Please raise the dispute first.");
+      }
+  
+      const existingUrls: string[] = Array.isArray(disputeRow[column]) ? disputeRow[column] : [];
+      const newUrls = [...existingUrls, ...uploadedUrls];
+  
       const { error: updateError } = await supabase
-        .from('disputes')
-        .upsert({ order_id: orderId, [column]: newUrls }, { onConflict: 'order_id', ignoreDuplicates: false });
+        .from("disputes")
+        .update({ [column]: newUrls })
+        .eq("order_id", orderId);
+  
       if (updateError) throw updateError;
+  
       toast.success(`Uploaded ${uploadedUrls.length} file(s)`);
       setPreviewFiles(newUrls);
       onEvidenceUpdated();
     } catch (err: any) {
-      toast.error(err.message || 'Upload failed');
+      toast.error(err.message || "Upload failed");
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -1838,7 +1859,7 @@ export default function DealRoom() {
       if (disputeUpsertError) {
         console.error("Failed to create dispute record:", disputeUpsertError);
       }
-      
+
       await supabase.from("messages").insert({
         order_id: orderId,
         sender_type: "system",
