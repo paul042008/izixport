@@ -1435,17 +1435,36 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
 
   const submitDispute = async () => {
     if (!reason.trim()) { toast.error("Please choose a dispute reason."); return; }
+    if (!currentUser?.id) { toast.error("You must be signed in to raise a dispute."); return; }
     setSubmitting(true);
     try {
+      // Step 1 — create the dispute row FIRST (before touching escrow/order status).
+      // Never upsert here: upsert's onConflict requires a unique constraint on
+      // order_id that may not exist yet, and a failed onConflict match was silently
+      // swallowed before, leaving orders marked "disputed" with no disputes row at all.
+      // Check first, insert only if missing, and tolerate a race (23505 = unique_violation).
+      const { data: existingDispute, error: existingErr } = await supabase
+        .from("disputes")
+        .select("id")
+        .eq("order_id", orderId)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+
+      if (!existingDispute) {
+        const { error: insertErr } = await supabase.from("disputes").insert({
+          order_id: orderId,
+          status: "open",
+          reason: reason.trim(),
+          raised_by: currentUser.id,
+        });
+        if (insertErr && insertErr.code !== "23505") throw insertErr;
+      }
+
+      // Step 2 — freeze escrow + change order status (unchanged business logic).
       const { error } = await supabase.from("orders").update({ order_status: "disputed", escrow_status: "frozen", dispute_raised: true }).eq("id", orderId);
       if (error) throw error;
-      // NEW: ensure a row exists in `disputes` so evidence upload / admin resolution can attach to it.
-      // Upsert on order_id — never overwrites an existing open dispute's evidence.
-      const { error: disputeUpsertError } = await supabase.from("disputes").upsert(
-        { order_id: orderId, status: "open", reason, raised_by: currentUser.id },
-        { onConflict: "order_id", ignoreDuplicates: false }
-      );
-      if (disputeUpsertError) console.error("Failed to create dispute record:", disputeUpsertError);
+
+      // Step 3 — system message (unchanged).
       await supabase.from("messages").insert({ order_id: orderId, sender_type: "system", is_ai: true, content: `⚠️ A dispute has been raised.\nReason: ${reason}\nEscrow is frozen until the case is reviewed.` });
       toast.error("Dispute raised.");
       setShowDispute(false);
@@ -1564,55 +1583,83 @@ function DisputeEvidencePanel({ orderId, role, canUpload, disputeData, onEvidenc
     try {
       const uploadedUrls: string[] = [];
   
+      // Determine which bucket to use
+      let bucket = "dispute-evidence";
+      const { data: buckets } = await supabase.storage.listBuckets();
+      if (!buckets?.some((b) => b.name === bucket)) {
+        bucket = "listings";
+      }
+  
+      // Upload all selected files
       for (const file of files) {
         const path = `disputes/${orderId}/${role}/${Date.now()}_${file.name}`;
   
-        let bucket = "dispute-evidence";
-        const { data: buckets } = await supabase.storage.listBuckets();
-        const bucketExists = buckets?.some((b) => b.name === bucket);
-        if (!bucketExists) bucket = "listings";
-  
         const { data, error } = await supabase.storage
           .from(bucket)
-          .upload(path, file, { cacheControl: "3600", upsert: false });
+          .upload(path, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
   
         if (error) throw error;
   
-        const publicUrl = supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
+        const publicUrl = supabase.storage
+          .from(bucket)
+          .getPublicUrl(data.path).data.publicUrl;
+  
         uploadedUrls.push(publicUrl);
       }
   
+      // Fetch the existing dispute (do NOT use single())
       const { data: disputeRow, error: fetchError } = await supabase
         .from("disputes")
-        .select("buyer_evidence_urls, exporter_evidence_urls")
+        .select("id,buyer_evidence_urls,exporter_evidence_urls")
         .eq("order_id", orderId)
-        .single();
+        .maybeSingle();
   
-      if (fetchError || !disputeRow) {
-        throw new Error("Dispute record not found. Please raise the dispute first.");
+      if (fetchError) throw fetchError;
+  
+      // If no dispute exists yet, stop here
+      if (!disputeRow) {
+        throw new Error(
+          "Dispute record not found. Please raise the dispute before uploading evidence."
+        );
       }
   
-      const existingUrls: string[] = Array.isArray(disputeRow[column]) ? disputeRow[column] : [];
-      const newUrls = [...existingUrls, ...uploadedUrls];
+      const existingUrls = Array.isArray(disputeRow[column])
+        ? disputeRow[column]
+        : [];
   
+      const updatedUrls = [...existingUrls, ...uploadedUrls];
+  
+      // Update ONLY the evidence column
       const { error: updateError } = await supabase
         .from("disputes")
-        .update({ [column]: newUrls })
-        .eq("order_id", orderId);
+        .update({
+          [column]: updatedUrls,
+        })
+        .eq("id", disputeRow.id);
   
       if (updateError) throw updateError;
   
+      setPreviewFiles(updatedUrls);
+  
       toast.success(`Uploaded ${uploadedUrls.length} file(s)`);
-      setPreviewFiles(newUrls);
+  
       onEvidenceUpdated();
     } catch (err: any) {
-      toast.error(err.message || "Upload failed");
+      console.error(err);
+      toast.error(err.message || "Failed to upload evidence.");
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
+  
   return (
     <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: 16 }}>
       <div style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: '0.05em', textTransform: 'uppercase', color: '#111827', marginBottom: 12 }}>
@@ -1833,33 +1880,40 @@ export default function DealRoom() {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result?.error || "Failed to raise dispute.");
 
+      if (!currentUser?.id) {
+        throw new Error("You must be signed in to raise a dispute");
+      }
+
+      // Step 1 — create the dispute row FIRST. Check-then-insert instead of upsert:
+      // upsert's onConflict needs a unique constraint on order_id that may not exist,
+      // and a failed match was previously swallowed, leaving no disputes row behind.
+      const { data: existingDispute, error: existingErr } = await supabase
+        .from("disputes")
+        .select("id")
+        .eq("order_id", orderId)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+
+      if (!existingDispute) {
+        const { error: insertErr } = await supabase.from("disputes").insert({
+          order_id: orderId,
+          status: "open",
+          reason: disputeReason.trim(),
+          raised_by: currentUser.id,
+        });
+        if (insertErr && insertErr.code !== "23505") throw insertErr;
+      }
+
+      // Step 2 — freeze escrow + change order status locally (the edge function's
+      // /dispute route already set this server-side; this keeps the UI in sync
+      // immediately without waiting on a refetch).
       await supabase.from("orders").update({
         order_status: "disputed",
         escrow_status: "frozen",
         dispute_raised: true,
       }).eq("id", orderId);
 
-      // NEW: ensure a row exists in `disputes` so evidence upload / admin resolution can attach to it.
-      if (!currentUser?.id) {
-        throw new Error("You must be signed in to raise a dispute");
-      }
-      
-      const { error: disputeUpsertError } = await supabase
-        .from("disputes")
-        .upsert(
-          {
-            order_id: orderId,
-            status: "open",
-            reason: disputeReason.trim(),
-            raised_by: currentUser.id,
-          },
-          { onConflict: "order_id", ignoreDuplicates: false }
-        );
-      
-      if (disputeUpsertError) {
-        console.error("Failed to create dispute record:", disputeUpsertError);
-      }
-
+      // Step 3 — system message (unchanged).
       await supabase.from("messages").insert({
         order_id: orderId,
         sender_type: "system",
