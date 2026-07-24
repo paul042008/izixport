@@ -9,6 +9,11 @@
 // - Dispute resolution integrates with Pandascrow release/freeze/refund.
 // - Audit logging via reusable helper.
 // - Production security: admin ID is never trusted from client.
+//
+// NEW: Dispute improvements (2026-07-24)
+// - Admin deal drawer shows checklist documents and dispute evidence.
+// - Admin can resolve disputes with "Release to Exporter" and "Refund Buyer" buttons.
+// - File preview for all evidence documents.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -568,6 +573,18 @@ async function safeCopy(text: string, label: string) {
   }
 }
 
+// ── Helper to get document URLs from checklist item ──
+function getDocumentUrls(step: any): string[] {
+  const urls = Array.isArray(step.document_urls) ? step.document_urls.filter(Boolean) : [];
+  if (urls.length > 0) return urls;
+  return step.document_url ? [step.document_url] : [];
+}
+
+// ── Helper to check if order is fully closed ──────────
+const isOrderClosed = (status: string) => {
+  return ['completed', 'refunded', 'cancelled'].includes(status);
+};
+
 // ════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════
@@ -736,7 +753,7 @@ export default function AdminPanel() {
         <div className="flex-1 p-3 sm:p-6">
           {activeTab === 'overview' && <OverviewPage adminId={adminUser?.id} />}
           {activeTab === 'verifications' && <VerificationsPage adminId={adminUser?.id} />}
-          {activeTab === 'deals' && <DealsPage />}
+          {activeTab === 'deals' && <DealsPage adminId={adminUser?.id} />}
           {activeTab === 'disputes' && <DisputesPage adminId={adminUser?.id} />}
           {activeTab === 'users' && <UsersPage />}
           {activeTab === 'notifications' && <NotificationsPage />}
@@ -1634,7 +1651,7 @@ function VerificationCard({ v, tab, actionLoading, onApprove, onReject, onReRevi
 // ════════════════════════════════════════════════════════
 // PAGE 3: ACTIVE DEALS — Live monitoring with server-side pagination/search, escrow tools, and admin chat
 // ════════════════════════════════════════════════════════
-function DealsPage() {
+function DealsPage({ adminId }: { adminId: string }) {
   const navigate = useNavigate();
   const [deals, setDeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1697,6 +1714,9 @@ function DealsPage() {
   // Drawer state
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [checklistItems, setChecklistItems] = useState<any[]>([]);
+  const [disputeInfo, setDisputeInfo] = useState<any>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
 
   // Messages state
   const [messages, setMessages] = useState<any[]>([]);
@@ -1709,6 +1729,9 @@ function DealsPage() {
   const [escrowToolLoading, setEscrowToolLoading] = useState<string | null>(null);
   const [escrowStatusData, setEscrowStatusData] = useState<any>(null);
   const [showEscrowStatus, setShowEscrowStatus] = useState(false);
+
+  // ── New: file preview modal for checklist/evidence ──
+  const [previewModal, setPreviewModal] = useState<{ open: boolean; url: string; label: string }>({ open: false, url: '', label: '' });
 
   const fetchDeals = useCallback(async () => {
     setLoading(true);
@@ -1767,10 +1790,35 @@ function DealsPage() {
   }, [fetchDeals]);
 
   // ── Drawer functions ──
-  const openDealDrawer = (order: any) => {
+  const openDealDrawer = async (order: any) => {
     setSelectedOrder(order);
     setDrawerOpen(true);
-    fetchMessages(order.id);
+    setDrawerLoading(true);
+    try {
+      // Fetch checklist
+      const { data: checklist } = await supabase
+        .from('deal_checklist')
+        .select('*')
+        .eq('order_id', order.id);
+      setChecklistItems(checklist || []);
+
+      // Fetch dispute if exists
+      if (order.dispute_raised) {
+        const { data: dispute } = await supabase
+          .from('disputes')
+          .select('*')
+          .eq('order_id', order.id)
+          .maybeSingle();
+        setDisputeInfo(dispute);
+      } else {
+        setDisputeInfo(null);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDrawerLoading(false);
+    }
+    await fetchMessages(order.id);
   };
 
   const closeDrawer = () => {
@@ -1778,6 +1826,8 @@ function DealsPage() {
     setSelectedOrder(null);
     setMessages([]);
     setEscrowStatusData(null);
+    setChecklistItems([]);
+    setDisputeInfo(null);
   };
 
   const fetchMessages = async (orderId: string) => {
@@ -1799,11 +1849,15 @@ function DealsPage() {
   // ── Admin chat sender (now uses sender_type='admin') ──────────────────────
   const sendMessage = async () => {
     if (!chatInput.trim() || !selectedOrder || sending) return;
-  
+    // Prevent sending if order is closed (completed/refunded/cancelled)
+    if (['completed','refunded','cancelled'].includes(selectedOrder.order_status)) {
+      toast.error('This deal is closed. No further messages allowed.');
+      return;
+    }
     const content = chatInput.trim();
     setChatInput('');
     setSending(true);
-  
+
     const session = (await supabase.auth.getSession()).data.session;
     const adminId = session?.user?.id;
     if (!adminId) {
@@ -1811,7 +1865,7 @@ function DealsPage() {
       setSending(false);
       return;
     }
-  
+
     const tempId = 'temp-' + Date.now();
     const newMsg = {
       id: tempId,
@@ -1823,9 +1877,9 @@ function DealsPage() {
       is_system: false,
       created_at: new Date().toISOString(),
     };
-  
+
     setMessages(prev => [...prev, newMsg]);
-  
+
     try {
       const { error } = await supabase
         .from('messages')
@@ -1837,11 +1891,11 @@ function DealsPage() {
           is_ai: false,
           is_system: false,
         });
-  
+
       if (error) throw error;
-  
+
       toast.success('Message sent');
-  
+
       await logAuditEvent({
         adminId,
         action: 'admin_sent_message',
@@ -1849,7 +1903,7 @@ function DealsPage() {
         targetId: selectedOrder.id,
         details: content.slice(0, 100),
       });
-  
+
       await fetchMessages(selectedOrder.id);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send message');
@@ -1912,7 +1966,6 @@ function DealsPage() {
       const result = await callPandascrow('escrow', 'GET', { uuid: order.pandascrow_escrow_id });
       setEscrowStatusData(result);
       toast.success('Escrow status refreshed');
-      const adminId = (await supabase.auth.getSession()).data.session?.user?.id || '';
       await logAuditEvent({ adminId, action: 'refresh_escrow', targetType: 'order', targetId: order.id });
     } catch (err: any) {
       toast.error(err.message);
@@ -1929,9 +1982,10 @@ function DealsPage() {
       await callPandascrow('release', 'POST', { orderId: order.id });
       await supabase.from('orders').update({ escrow_status: 'released', order_status: 'completed' }).eq('id', order.id);
       toast.success('Escrow released');
-      const adminId = (await supabase.auth.getSession()).data.session?.user?.id || '';
       await logAuditEvent({ adminId, action: 'release_escrow', targetType: 'order', targetId: order.id });
       fetchDeals();
+      // Refresh drawer data
+      if (selectedOrder) openDealDrawer(selectedOrder);
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -1946,10 +2000,15 @@ function DealsPage() {
     try {
       await callPandascrow('dispute', 'POST', { orderId: order.id, reason: 'Admin freeze' });
       await supabase.from('orders').update({ escrow_status: 'frozen', order_status: 'disputed', dispute_raised: true }).eq('id', order.id);
+      // NEW: ensure a `disputes` row exists (upsert on order_id) so evidence/resolution tooling works.
+      await supabase.from('disputes').upsert(
+        { order_id: order.id, status: 'open', reason: 'Admin freeze', raised_by: adminId },
+        { onConflict: 'order_id', ignoreDuplicates: false }
+      );
       toast.success('Escrow frozen (dispute raised)');
-      const adminId = (await supabase.auth.getSession()).data.session?.user?.id || '';
       await logAuditEvent({ adminId, action: 'freeze_escrow', targetType: 'order', targetId: order.id });
       fetchDeals();
+      if (selectedOrder) openDealDrawer(selectedOrder);
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -1963,7 +2022,6 @@ function DealsPage() {
     try {
       await callPandascrow('resend-otp', 'POST', { uuid: order.pandascrow_escrow_id, orderId: order.id });
       toast.success('OTP resent');
-      const adminId = (await supabase.auth.getSession()).data.session?.user?.id || '';
       await logAuditEvent({ adminId, action: 'resend_otp', targetType: 'order', targetId: order.id });
     } catch (err: any) {
       toast.error(err.message);
@@ -1979,6 +2037,113 @@ function DealsPage() {
   const dealAge = (createdAt: string) => {
     const diff = Date.now() - new Date(createdAt).getTime();
     return Math.floor(diff / (1000 * 60 * 60 * 24));
+  };
+
+  // ── Dispute resolution handlers ──────────────────────────────────────────
+  // NEW: post a system/admin chat message explaining a dispute decision, then lock chat
+  // happens implicitly once order_status moves to completed/refunded/cancelled.
+  const postDisputeResolutionMessage = async (orderId: string, content: string) => {
+    await supabase.from('messages').insert({
+      order_id: orderId,
+      sender_type: 'admin',
+      sender_id: adminId,
+      content,
+      is_ai: false,
+      is_system: false,
+    });
+  };
+
+  const handleReleaseToExporter = async () => {
+    if (!selectedOrder) return;
+    if (!confirm(`Release escrow to exporter for order ${selectedOrder.id.slice(0,8)}? This will close the dispute.`)) return;
+    try {
+      // Call PandaScrow release — never touch Supabase before this succeeds.
+      await callPandascrow('release', 'POST', { orderId: selectedOrder.id });
+      // Update order
+      await supabase.from('orders').update({
+        escrow_status: 'released',
+        order_status: 'completed',
+        dispute_raised: false,
+      }).eq('id', selectedOrder.id);
+      // Update dispute
+      if (disputeInfo) {
+        await supabase.from('disputes').update({
+          status: 'resolved',
+          admin_decision: 'release_to_exporter',
+          resolved_by: adminId,
+          resolved_at: new Date().toISOString(),
+        }).eq('id', disputeInfo.id);
+      }
+      await postDisputeResolutionMessage(
+        selectedOrder.id,
+        '✅ Dispute resolved by IziXport Support: escrow has been released to the exporter. This deal is now closed.'
+      );
+      toast.success('Dispute resolved – funds released to exporter.');
+      await logAuditEvent({ adminId, action: 'dispute_release', targetType: 'order', targetId: selectedOrder.id });
+      fetchDeals();
+      closeDrawer();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to resolve dispute');
+    }
+  };
+
+  const handleRefundBuyer = async () => {
+    if (!selectedOrder) return;
+    if (!confirm(`Refund buyer for order ${selectedOrder.id.slice(0,8)}? This will close the dispute and refund the buyer.`)) return;
+    try {
+      // Call PandaScrow refund — do NOT update Supabase unless this succeeds.
+      await callPandascrow('refund', 'POST', { orderId: selectedOrder.id });
+      await supabase.from('orders').update({
+        escrow_status: 'refunded',
+        order_status: 'refunded',
+        dispute_raised: false,
+      }).eq('id', selectedOrder.id);
+      if (disputeInfo) {
+        await supabase.from('disputes').update({
+          status: 'resolved',
+          admin_decision: 'full_refund_buyer',
+          resolved_by: adminId,
+          resolved_at: new Date().toISOString(),
+        }).eq('id', disputeInfo.id);
+      }
+      await postDisputeResolutionMessage(
+        selectedOrder.id,
+        '✅ Dispute resolved by IziXport Support: the buyer has been refunded in full. This deal is now closed.'
+      );
+      toast.success('Dispute resolved – buyer refunded.');
+      await logAuditEvent({ adminId, action: 'dispute_refund', targetType: 'order', targetId: selectedOrder.id });
+      fetchDeals();
+      closeDrawer();
+    } catch (err: any) {
+      toast.error(err.message || 'Refund failed — order was not updated. Please retry or check the escrow provider.');
+    }
+  };
+
+  // NEW: Part of dispute resolution toolkit — placeholder only (full partial-split flow already
+  // lives in the dedicated Disputes tab / DisputesPage's Partial Resolution modal).
+  const handlePartialSettlementPlaceholder = () => {
+    toast('Partial settlement isn\'t available from this drawer yet — use the Disputes tab for a full partial-split resolution.', { icon: 'ℹ️' });
+  };
+
+  // NEW: ask both parties for more evidence without changing order/dispute state.
+  const handleRequestMoreEvidence = async () => {
+    if (!selectedOrder) return;
+    try {
+      await postDisputeResolutionMessage(
+        selectedOrder.id,
+        '📎 IziXport Support has requested additional evidence from both parties to help resolve this dispute. Please upload any relevant documents or photos.'
+      );
+      await logAuditEvent({ adminId, action: 'dispute_request_evidence', targetType: 'order', targetId: selectedOrder.id });
+      toast.success('Requested more evidence — message posted to the deal chat.');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send request');
+    }
+  };
+
+  // ── File preview helper ──
+  const openPreview = (url: string, label: string) => {
+    if (!url) return;
+    setPreviewModal({ open: true, url, label });
   };
 
   const FILTERS: { key: DealFilter; label: string }[] = [
@@ -2378,6 +2543,133 @@ function DealsPage() {
               </div>
             </div>
 
+            {/* ── Checklist Documents ── */}
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h4 className="font-bold text-sm flex items-center gap-2" style={{ color: C.darkGreen }}>
+                <FileText size={14} /> Checklist Documents
+              </h4>
+              {drawerLoading ? (
+                <div className="text-xs text-gray-400">Loading...</div>
+              ) : checklistItems.length === 0 ? (
+                <div className="text-xs text-gray-400">No checklist items yet.</div>
+              ) : (
+                <div className="space-y-2 mt-2">
+                  {checklistItems.map(item => (
+                    <div key={item.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200">
+                      <div>
+                        <span className="text-xs font-medium">{item.step_label}</span>
+                        {item.completed && <span className="text-xs text-green-600 ml-2">✅</span>}
+                        {item.reference_number && (
+                          <div className="text-xs text-gray-500">Tracking: {item.reference_number}</div>
+                        )}
+                        {item.carrier_name && (
+                          <div className="text-xs text-gray-500">Carrier: {item.carrier_name}</div>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        {getDocumentUrls(item).map((url, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => openPreview(url, item.step_label)}
+                            className="text-xs text-blue-600 underline"
+                          >
+                            View {idx+1}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── Dispute Evidence (buyer + exporter) ── */}
+            {disputeInfo && (
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h4 className="font-bold text-sm flex items-center gap-2" style={{ color: C.darkGreen }}>
+                  <AlertTriangle size={14} /> Dispute Evidence
+                </h4>
+                <div className="mt-2">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#9CA3AF' }}>Buyer</p>
+                  {disputeInfo.buyer_evidence_urls && disputeInfo.buyer_evidence_urls.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {disputeInfo.buyer_evidence_urls.map((url: string, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => openPreview(url, `Buyer Evidence ${idx+1}`)}
+                          className="text-xs text-blue-600 underline"
+                        >
+                          Evidence {idx+1}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400">No buyer evidence uploaded.</div>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#9CA3AF' }}>Exporter</p>
+                  {disputeInfo.exporter_evidence_urls && disputeInfo.exporter_evidence_urls.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {disputeInfo.exporter_evidence_urls.map((url: string, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => openPreview(url, `Exporter Evidence ${idx+1}`)}
+                          className="text-xs text-blue-600 underline"
+                        >
+                          Evidence {idx+1}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400">No exporter evidence uploaded.</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Dispute Resolution Buttons ── */}
+            {disputeInfo && disputeInfo.status === 'open' && (
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h4 className="font-bold text-sm flex items-center gap-2" style={{ color: C.darkGreen }}>
+                  <Lock size={14} /> Resolve Dispute
+                </h4>
+                <div className="flex flex-wrap gap-3 mt-2">
+                  <button
+                    onClick={handleReleaseToExporter}
+                    className="flex-1 py-2 rounded-lg bg-green-600 text-white text-sm font-bold hover:bg-green-700"
+                    style={{ minWidth: 140 }}
+                  >
+                    Release to Exporter
+                  </button>
+                  <button
+                    onClick={handleRefundBuyer}
+                    className="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700"
+                    style={{ minWidth: 140 }}
+                  >
+                    Refund Buyer
+                  </button>
+                  <button
+                    onClick={handlePartialSettlementPlaceholder}
+                    className="flex-1 py-2 rounded-lg text-sm font-bold border hover:bg-gray-50"
+                    style={{ minWidth: 140, border: `1.5px solid ${C.gold}`, color: C.gold }}
+                  >
+                    Partial Settlement
+                  </button>
+                  <button
+                    onClick={handleRequestMoreEvidence}
+                    className="flex-1 py-2 rounded-lg text-sm font-bold border hover:bg-gray-50"
+                    style={{ minWidth: 140, border: '1.5px solid #9CA3AF', color: '#374151' }}
+                  >
+                    Request More Evidence
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Audit Timeline (built from existing order/checklist/dispute data) ── */}
+            <DealAuditTimeline order={selectedOrder} checklistItems={checklistItems} disputeInfo={disputeInfo} messages={messages} />
+
             {/* ── Escrow Tools ── */}
             {selectedOrder.pandascrow_escrow_id && (
               <div className="px-6 py-4 border-b border-gray-100">
@@ -2491,28 +2783,59 @@ function DealsPage() {
                 )}
               </div>
 
-              {/* Chat Input */}
-              <div className="mt-3 flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Type a message as IziXport Support…"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
-                  className="flex-1 px-4 py-2 rounded-xl border text-sm outline-none"
-                  style={{ border: '1.5px solid #E5E7EB' }}
-                  onFocus={(e) => (e.currentTarget.style.border = `1.5px solid ${C.gold}`)}
-                  onBlur={(e) => (e.currentTarget.style.border = '1.5px solid #E5E7EB')}
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!chatInput.trim() || sending}
-                  className="px-4 py-2 rounded-xl font-bold text-white text-sm disabled:opacity-50"
-                  style={{ background: C.gold }}
-                >
-                  {sending ? '…' : 'Send'}
+              {/* Chat Input – only if order not closed */}
+              {!isOrderClosed(selectedOrder.order_status) && (
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type a message as IziXport Support…"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
+                    className="flex-1 px-4 py-2 rounded-xl border text-sm outline-none"
+                    style={{ border: '1.5px solid #E5E7EB' }}
+                    onFocus={(e) => (e.currentTarget.style.border = `1.5px solid ${C.gold}`)}
+                    onBlur={(e) => (e.currentTarget.style.border = '1.5px solid #E5E7EB')}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!chatInput.trim() || sending}
+                    className="px-4 py-2 rounded-xl font-bold text-white text-sm disabled:opacity-50"
+                    style={{ background: C.gold }}
+                  >
+                    {sending ? '…' : 'Send'}
+                  </button>
+                </div>
+              )}
+              {isOrderClosed(selectedOrder.order_status) && (
+                <div className="text-xs text-gray-400 mt-2 text-center">Deal is closed – no new messages.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── File Preview Modal ── */}
+      {previewModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <h3 className="font-bold text-sm" style={{ color: C.darkGreen }}>{previewModal.label}</h3>
+              <div className="flex items-center gap-2">
+                <a href={previewModal.url} target="_blank" rel="noreferrer" download className="text-xs font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 transition">
+                  <Download size={12} /> Download
+                </a>
+                <button onClick={() => setPreviewModal({ open: false, url: '', label: '' })} className="p-1 hover:bg-gray-100 rounded-lg">
+                  <X size={18} style={{ color: '#9CA3AF' }} />
                 </button>
               </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-50 flex items-center justify-center p-4">
+              {previewModal.url.toLowerCase().endsWith('.pdf') ? (
+                <iframe src={previewModal.url} className="w-full h-full min-h-[60vh] rounded-lg border border-gray-200" title={previewModal.label} />
+              ) : (
+                <img src={previewModal.url} alt={previewModal.label} className="max-w-full max-h-[70vh] rounded-lg shadow-lg border border-gray-200" />
+              )}
             </div>
           </div>
         </div>
@@ -2633,19 +2956,16 @@ function DisputesPage({ adminId }: { adminId: string }) {
   const handleRefund = async (dispute: any) => {
     setActionLoading(dispute.id);
     try {
-      try {
-        await callPandascrow('refund', 'POST', { orderId: dispute.order_id });
-      } catch (refundErr) {
-        console.warn('Refund endpoint not available, updating Supabase only', refundErr);
-      }
-      await supabase.from('orders').update({ escrow_status: 'refunded', order_status: 'cancelled' }).eq('id', dispute.order_id);
+      // Never update Supabase unless PandaScrow actually confirms the refund.
+      await callPandascrow('refund', 'POST', { orderId: dispute.order_id });
+      await supabase.from('orders').update({ escrow_status: 'refunded', order_status: 'refunded' }).eq('id', dispute.order_id);
       await supabase.from('disputes').update({ status: 'resolved', admin_decision: 'full_refund_buyer', resolved_by: adminId, resolved_at: new Date().toISOString() }).eq('id', dispute.id);
       await notifyParties(dispute, 'full_refund_buyer');
       await logAuditEvent({ adminId, action: 'dispute_refund', targetType: 'order', targetId: dispute.order_id, details: 'Full refund to buyer' });
       toast.success('Full refund issued to buyer');
       fetchDisputes();
     } catch (err: any) {
-      toast.error(err.message || 'Action failed');
+      toast.error(err.message || 'Refund failed — order was not updated. Please retry or check the escrow provider.');
     } finally {
       setActionLoading(null);
     }
@@ -2663,12 +2983,8 @@ function DisputesPage({ adminId }: { adminId: string }) {
     const release = total - refund;
     setActionLoading(dispute.id);
     try {
-      // Try to call PandaScrow partial (if supported), otherwise just update Supabase.
-      try {
-        await callPandascrow('partial', 'POST', { orderId: dispute.order_id, refund, release });
-      } catch (partialErr) {
-        console.warn('Partial endpoint not available, updating Supabase only', partialErr);
-      }
+      // Never update Supabase unless PandaScrow actually confirms the split.
+      await callPandascrow('partial', 'POST', { orderId: dispute.order_id, refund, release });
       await supabase.from('orders').update({ escrow_status: 'partial', order_status: 'completed' }).eq('id', dispute.order_id);
       await supabase.from('disputes').update({
         status: 'resolved',
@@ -2685,7 +3001,7 @@ function DisputesPage({ adminId }: { adminId: string }) {
       setRefundAmount('');
       fetchDisputes();
     } catch (err: any) {
-      toast.error(err.message || 'Action failed');
+      toast.error(err.message || 'Partial settlement failed — order was not updated. Please retry or check the escrow provider.');
     } finally {
       setActionLoading(null);
     }
@@ -3248,6 +3564,83 @@ function NotificationsPage() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// NEW: Deal Audit Timeline — assembled from data already loaded for the drawer
+// (order fields, checklist items, dispute record, messages). No new fetches.
+// ════════════════════════════════════════════════════════
+function DealAuditTimeline({ order, checklistItems, disputeInfo, messages }: {
+  order: any; checklistItems: any[]; disputeInfo: any; messages: any[];
+}) {
+  if (!order) return null;
+
+  type TimelineEvent = { label: string; time: string; icon: React.ReactNode };
+  const events: TimelineEvent[] = [];
+
+  if (order.created_at) {
+    events.push({ label: 'Escrow Created', time: order.created_at, icon: <Lock size={12} /> });
+  }
+  if (order.payment_confirmed_at) {
+    events.push({ label: 'Escrow Funded', time: order.payment_confirmed_at, icon: <DollarSign size={12} /> });
+  }
+  if (order.freight_approved_at) {
+    events.push({ label: 'Freight Approved', time: order.freight_approved_at, icon: <CheckCircle2 size={12} /> });
+  }
+  const photosStep = checklistItems.find(c => c.step_key === 'pre_shipment_photos' && c.completed);
+  if (photosStep?.completed_at) {
+    events.push({ label: 'Pre-shipment Photos Uploaded', time: photosStep.completed_at, icon: <FileText size={12} /> });
+  }
+  const bolStep = checklistItems.find(c => c.step_key === 'bill_of_lading' && c.completed);
+  if (bolStep?.completed_at) {
+    events.push({ label: 'Bill of Lading Uploaded', time: bolStep.completed_at, icon: <FileText size={12} /> });
+  }
+  const trackingStep = checklistItems.find(c => c.step_key === 'tracking_confirmed' && c.completed);
+  if (trackingStep?.completed_at) {
+    events.push({ label: 'Tracking Assigned', time: trackingStep.completed_at, icon: <Send size={12} /> });
+  }
+  if (order.dispute_raised || disputeInfo) {
+    events.push({ label: 'Buyer Raised Dispute', time: disputeInfo?.created_at || order.updated_at || order.created_at, icon: <AlertTriangle size={12} /> });
+  }
+  if (disputeInfo?.buyer_evidence_urls?.length || disputeInfo?.exporter_evidence_urls?.length) {
+    events.push({ label: 'Evidence Uploaded', time: disputeInfo.updated_at || disputeInfo.created_at, icon: <FileText size={12} /> });
+  }
+  (messages || []).filter(m => m.sender_type === 'admin').forEach((m, i) => {
+    events.push({ label: `Admin Message${m.content ? ': ' + m.content.slice(0, 40) + (m.content.length > 40 ? '…' : '') : ''}`, time: m.created_at, icon: <MessageCircle size={12} /> });
+  });
+  if (order.escrow_status === 'released') {
+    events.push({ label: 'Escrow Released', time: disputeInfo?.resolved_at || order.updated_at || order.created_at, icon: <CheckCircle2 size={12} /> });
+  }
+  if (order.escrow_status === 'refunded') {
+    events.push({ label: 'Refund Completed', time: disputeInfo?.resolved_at || order.updated_at || order.created_at, icon: <XCircle size={12} /> });
+  }
+
+  const sorted = events
+    .filter(e => e.time)
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+  if (sorted.length === 0) return null;
+
+  return (
+    <div className="px-6 py-4 border-b border-gray-100">
+      <h4 className="font-bold text-sm flex items-center gap-2 mb-3" style={{ color: C.darkGreen }}>
+        <Activity size={14} /> Audit Timeline
+      </h4>
+      <div className="space-y-3">
+        {sorted.map((e, idx) => (
+          <div key={idx} className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-gray-100" style={{ color: C.gold }}>
+              {e.icon}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold" style={{ color: '#374151' }}>{e.label}</p>
+              <p className="text-[10px]" style={{ color: '#9CA3AF' }}>{new Date(e.time).toLocaleString()}</p>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

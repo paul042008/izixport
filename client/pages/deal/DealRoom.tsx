@@ -31,6 +31,11 @@
 // - Admin messages are sent with sender_type='admin' and rendered with a special bubble.
 // - Admin sees all sections (freight, checklist, payment info) but cannot initiate payment or change status.
 // - Admin can send messages as "🛡 IziXport Support".
+//
+// NEW: Dispute improvements (2026-07-24)
+// - Buyer can still chat after dispute is opened.
+// - Buyer can upload evidence (multiple files) to the dispute.
+// - Evidence is stored in disputes.buyer_evidence_urls and displayed in the dispute panel.
 
 import { useEffect, useRef, useState, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -138,6 +143,11 @@ interface CurrentUser {
   violation_count: number;
   preferred_language?: string;
 }
+
+// helper to check if order is fully closed (no further chat or actions)
+const isOrderClosed = (status: string) => {
+  return ['completed', 'refunded', 'cancelled'].includes(status);
+};
 
 const PAYMENT_TRIGGERS = /\b(payment|pay now|review payment|open payment|proceed to payment|pay)\b/i;
 
@@ -1429,6 +1439,13 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
     try {
       const { error } = await supabase.from("orders").update({ order_status: "disputed", escrow_status: "frozen", dispute_raised: true }).eq("id", orderId);
       if (error) throw error;
+      // NEW: ensure a row exists in `disputes` so evidence upload / admin resolution can attach to it.
+      // Upsert on order_id — never overwrites an existing open dispute's evidence.
+      const { error: disputeUpsertError } = await supabase.from("disputes").upsert(
+        { order_id: orderId, status: "open", reason, raised_by: currentUser.id },
+        { onConflict: "order_id", ignoreDuplicates: false }
+      );
+      if (disputeUpsertError) console.error("Failed to create dispute record:", disputeUpsertError);
       await supabase.from("messages").insert({ order_id: orderId, sender_type: "system", is_ai: true, content: `⚠️ A dispute has been raised.\nReason: ${reason}\nEscrow is frozen until the case is reviewed.` });
       toast.error("Dispute raised.");
       setShowDispute(false);
@@ -1517,6 +1534,109 @@ function DeliveryConfirmPanel({ order, orderId, currentUser, isBuyer, onShowPlat
   );
 }
 
+// ─── NEW: Dispute evidence upload component ──────────────────────────────────
+// NEW: role is 'buyer' or 'exporter' — determines which column is read/appended to
+// (disputes.buyer_evidence_urls or disputes.exporter_evidence_urls) and who can upload.
+function DisputeEvidencePanel({ orderId, role, canUpload, disputeData, onEvidenceUpdated }: {
+  orderId: string;
+  role: "buyer" | "exporter";
+  canUpload: boolean;
+  disputeData: any;
+  onEvidenceUpdated: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [previewFiles, setPreviewFiles] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const column = role === "buyer" ? "buyer_evidence_urls" : "exporter_evidence_urls";
+
+  const evidenceUrls: string[] = disputeData?.[column] || [];
+
+  useEffect(() => {
+    setPreviewFiles(evidenceUrls);
+  }, [evidenceUrls]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of files) {
+        const path = `disputes/${orderId}/${role}/${Date.now()}_${file.name}`;
+        // Use 'dispute-evidence' bucket; fallback to 'listings' if needed
+        let bucket = 'dispute-evidence';
+        // Check if bucket exists, else fallback to 'listings'
+        const { data: buckets } = await supabase.storage.listBuckets();
+        const bucketExists = buckets?.some(b => b.name === bucket);
+        if (!bucketExists) bucket = 'listings';
+        const { data, error } = await supabase.storage.from(bucket).upload(path, file, { cacheControl: '3600' });
+        if (error) throw error;
+        const publicUrl = supabase.storage.from(bucket).getPublicUrl(data.path).data.publicUrl;
+        uploadedUrls.push(publicUrl);
+      }
+      // Append to existing — never overwrite previous uploads.
+      const newUrls = [...evidenceUrls, ...uploadedUrls];
+      // Upsert in case the dispute row doesn't exist yet for some reason (defensive; should already exist).
+      const { error: updateError } = await supabase
+        .from('disputes')
+        .upsert({ order_id: orderId, [column]: newUrls }, { onConflict: 'order_id', ignoreDuplicates: false });
+      if (updateError) throw updateError;
+      toast.success(`Uploaded ${uploadedUrls.length} file(s)`);
+      setPreviewFiles(newUrls);
+      onEvidenceUpdated();
+    } catch (err: any) {
+      toast.error(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: 16 }}>
+      <div style={{ fontWeight: 800, fontSize: 14, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: '0.05em', textTransform: 'uppercase', color: '#111827', marginBottom: 12 }}>
+        📎 {role === "buyer" ? "Buyer" : "Exporter"} Dispute Evidence
+      </div>
+      {canUpload && (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            style={{ background: '#D4A843', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            {uploading ? 'Uploading...' : 'Upload Evidence (images/PDF)'}
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            multiple
+            accept="image/*,application/pdf"
+            style={{ display: 'none' }}
+            onChange={handleUpload}
+          />
+        </div>
+      )}
+      {previewFiles.length === 0 ? (
+        <div style={{ color: '#9CA3AF', fontSize: 12 }}>No evidence uploaded yet.</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8 }}>
+          {previewFiles.map((url, idx) => (
+            <div key={idx} style={{ position: 'relative', paddingBottom: '100%', background: '#F3F4F6', borderRadius: 8, overflow: 'hidden', cursor: 'pointer' }} onClick={() => window.open(url, '_blank')}>
+              {isImageUrl(url) ? (
+                <img src={url} alt={`Evidence ${idx+1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#E5E7EB', color: '#6B7280', fontSize: 12 }}>
+                  📄 PDF
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DealRoom() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
@@ -1548,6 +1668,10 @@ export default function DealRoom() {
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeSubmitting, setDisputeSubmitting] = useState(false);
+
+  // ── NEW: Dispute data for evidence ─────────────────────────────────────────
+  const [disputeData, setDisputeData] = useState<any>(null);
+  const [disputeLoading, setDisputeLoading] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1694,6 +1818,13 @@ export default function DealRoom() {
         dispute_raised: true,
       }).eq("id", orderId);
 
+      // NEW: ensure a row exists in `disputes` so evidence upload / admin resolution can attach to it.
+      const { error: disputeUpsertError } = await supabase.from("disputes").upsert(
+        { order_id: orderId, status: "open", reason: disputeReason.trim(), raised_by: currentUser?.id ?? null },
+        { onConflict: "order_id", ignoreDuplicates: false }
+      );
+      if (disputeUpsertError) console.error("Failed to create dispute record:", disputeUpsertError);
+
       await supabase.from("messages").insert({
         order_id: orderId,
         sender_type: "system",
@@ -1801,6 +1932,35 @@ Buyer — you will see live updates as the exporter completes each step.`,
     const { data } = await supabase.from("messages").select("*").eq("order_id", dealId).order("created_at", { ascending: true });
     setMessages((data || []) as Message[]);
   };
+
+  // ── NEW: Fetch dispute data ─────────────────────────────────────────────────
+  const fetchDisputeData = useCallback(async () => {
+    if (!orderId || !order?.dispute_raised) {
+      setDisputeData(null);
+      return;
+    }
+    setDisputeLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('disputes')
+        .select('*')
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (error) throw error;
+      setDisputeData(data);
+    } catch (err) {
+      console.error('Failed to fetch dispute:', err);
+    } finally {
+      setDisputeLoading(false);
+    }
+  }, [orderId, order?.dispute_raised]);
+
+  // ── Call fetchDisputeData when dispute is raised ──────────────────────────
+  useEffect(() => {
+    if (order?.dispute_raised) {
+      fetchDisputeData();
+    }
+  }, [order?.dispute_raised, fetchDisputeData]);
 
   const seedWelcomeMessage = async (dealId: string, orderData: Order) => {
     // Check if the welcome message already exists by looking for the exact content
@@ -2113,7 +2273,7 @@ Waiting for exporter response.`;
 
   const escrowIsActive = ESCROW_ACTIVE_STATUSES.includes(order.order_status);
   const hasPandaScrowEscrow = Boolean(order.pandascrow_escrow_id);
-  const dealClosedOut = order.order_status === "completed" || order.order_status === "disputed";
+  const dealClosedOut = isOrderClosed(order.order_status);
 
   return (
     <>
@@ -2204,8 +2364,8 @@ Waiting for exporter response.`;
               })}
               <div ref={messagesEndRef} />
             </div>
-            {/* Allow admin to send messages even if order is completed/disputed */}
-            {(!(order.order_status === "completed" || order.order_status === "disputed") || isAdmin) && (
+            {/* Allow chat if order is not closed OR user is admin */}
+            {(!dealClosedOut || isAdmin) && (
               <div style={{ flexShrink: 0, borderTop: "1px solid #E5E7EB", background: "#fff", padding: "10px 12px" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                   <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1} placeholder={isAdmin ? "Type a message as IziXport Support…" : "Type a message…"}
@@ -2362,6 +2522,26 @@ Waiting for exporter response.`;
                   )}
                 </div>
               </div>
+            )}
+
+            {/* ── NEW: Dispute evidence panels (buyer + exporter, visible to all deal participants + admin) ── */}
+            {order.order_status === 'disputed' && (isBuyer || isExporter || isAdmin) && (
+              <>
+                <DisputeEvidencePanel
+                  orderId={order.id}
+                  role="buyer"
+                  canUpload={isBuyer}
+                  disputeData={disputeData}
+                  onEvidenceUpdated={() => { fetchDisputeData(); }}
+                />
+                <DisputeEvidencePanel
+                  orderId={order.id}
+                  role="exporter"
+                  canUpload={isExporter}
+                  disputeData={disputeData}
+                  onEvidenceUpdated={() => { fetchDisputeData(); }}
+                />
+              </>
             )}
           </div>
         )}
